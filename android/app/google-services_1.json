@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "144215391706",
+    "project_id": "reminderapp2024",
+    "storage_bucket": "reminderapp2024.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:144215391706:android:3d05ccd32611cac95314e3",
+        "android_client_info": {
+          "package_name": "com.rxdoz.reminderapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBAHqjAtNH1fd1m8RGiJ6ziDNRGCO4fmSY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
