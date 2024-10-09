@@ -1,14 +1,6 @@
 import 'react-native-gesture-handler';
-import React, {useEffect} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {Alert, StatusBar, View} from 'react-native';
 import {BottomTabsNavigator} from './App/Navigation/TabNavigator';
 import {NavigationContainer} from '@react-navigation/native';
 import {theme} from './App/Constants/theme';
@@ -16,31 +8,70 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {Landing, Permission, UserSchedule} from './App/Screens';
 
-import notifyBasedOnSchedule from './App/Services/NotificationService';
 import * as RNLocalize from 'react-native-localize';
 import i18n from './App/utils/i18n';
-import {useTranslation} from 'react-i18next';
+import {
+  getMedicineAndScheduleId,
+  handleNotificationPress,
+} from './App/Services/NotifyService';
+import {navigationRef} from './App/Services/NavigationService';
+import {getMedicineByScheduleId} from './App/Services/DatabaseService';
+
+import notifee, {AndroidImportance, EventType} from '@notifee/react-native';
 
 const Stack = createNativeStackNavigator();
 function App() {
-  const {t} = useTranslation();
-  // const date = m;
-  useEffect(() => {
-    const initApp = async () => {
-      console.log('Initial App');
-      // notifyBasedOnSchedule(t);
-    };
+  const handleNotification = async () => {
+    notifee.onForegroundEvent(({type, detail}) => {
+      if (type === EventType.ACTION_PRESS && detail.pressAction.id) {
+        console.log(
+          'User pressed an action with the id: ',
+          detail.pressAction.id,
+          detail,
+        );
+      }
+    });
+  };
 
-    initApp();
-    // console.log(getDosage());
-    console.log('App');
-  }, [t]);
+  useEffect(() => {
+    handleNotificationPress(); // Set up notification handling on app start
+    // handleNotification();
+  }, []);
 
   useEffect(() => {
     // Set the initial language based on device locale
     const locale = RNLocalize.getLocales()[0].languageCode;
     i18n.changeLanguage(locale);
+    // checkBattery();
   }, []);
+
+  const checkBattery = async () => {
+    const batteryLevel = await notifee.getBatteryLevel();
+    console.log(`Battery level: ${batteryLevel}`);
+    const batteryOptimizationEnabled =
+      await notifee.isBatteryOptimizationEnabled();
+    if (batteryOptimizationEnabled) {
+      // 2. ask your users to disable the feature
+      Alert.alert(
+        'Restrictions Detected',
+        'To ensure notifications are delivered, please disable battery optimization for the app.',
+        [
+          // 3. launch intent to navigate the user to the appropriate screen
+          {
+            text: 'OK, open settings',
+            onPress: async () =>
+              await notifee.openBatteryOptimizationSettings(),
+          },
+          {
+            text: 'Cancel',
+            onPress: () => console.log('Cancel Pressed'),
+            style: 'cancel',
+          },
+        ],
+        {cancelable: false},
+      );
+    }
+  };
 
   return (
     <SafeAreaProvider style={{flex: 1}}>
@@ -50,7 +81,7 @@ function App() {
         translucent={true}
       />
       <View style={{flex: 1}}>
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
           <Stack.Navigator
             initialRouteName="Landing"
             screenOptions={({navigation}) => ({
@@ -84,7 +115,5 @@ function App() {
     </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({});
 
 export default App;

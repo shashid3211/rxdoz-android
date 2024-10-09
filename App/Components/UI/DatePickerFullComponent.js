@@ -67,7 +67,7 @@ const DatePickerFullComponent = ({
         onCancel={onCancel}
         buttonColor={theme.COLORS.darkBlue_gradient2}
         dividerColor={theme.COLORS.darkBlue_gradient2}
-        minuteInterval={10}
+        minuteInterval={1}
         // locale={locale}
       />
     </View>

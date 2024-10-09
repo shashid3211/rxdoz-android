@@ -10,17 +10,17 @@ const ReportCard = medicineData => {
   const renderMedicineItem = ({item}) => (
     <Card style={styles.profileBox}>
       <Card.Content>
-        <Title style={styles.title}>{item.name}</Title>
+        <Title style={styles.title}>{item.medicineName}</Title>
         {/* <Paragraph>{item.description || 'No description available'}</Paragraph> */}
         <View style={styles.dosageInfo}>
           <Paragraph style={styles.para}>
-            {t('doseTaken')}: {item.takenCount}
+            {t('doseTaken')}: {item.takenDose}
           </Paragraph>
           <Paragraph style={styles.para}>
-            {t('doseMissed')}: {item.notTakenCount}
+            {t('doseMissed')}: {item.missedDose}
           </Paragraph>
           <Paragraph style={styles.para}>
-            {t('totalDoses')}: {item.totalDosages}
+            {t('totalDoses')}: {item.totalDose}
           </Paragraph>
         </View>
       </Card.Content>

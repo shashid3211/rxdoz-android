@@ -13,8 +13,10 @@ import {theme} from '../../Constants/theme';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
 import {getDBConnection, UpdateDosage} from '../../Database/DbService';
-import {addDose} from '../../Services/DatabaseService';
+import {addDose, updateMedicineStatus} from '../../Services/DatabaseService';
 import {useTranslation} from 'react-i18next';
+import ConfirmModalComponent from '../../Components/UI/ConfirmModalComponent';
+import ModalComponent from '../../Components/UI/ModalComponent';
 
 const ViewDosage = ({navigation, route}) => {
   const {t} = useTranslation();
@@ -24,14 +26,41 @@ const ViewDosage = ({navigation, route}) => {
     console.log(item);
     setDose(item);
   }, []);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [uId, setUId] = useState(null);
 
-  const updateData = async d => {
+  const handleConfirm = async () => {
+    const res = await updateMedicineStatus(uId, 'missed'); // Assume this function deletes a prescription by ID.
+    if (res) {
+      navigation.navigate('TreatmentScreen'); // Re-fetch the updated prescription list after deletion.
+    }
+    setModalVisible(false);
+    navigation.replace('MainTab');
+  };
+
+  const handleCancel = () => {
+    setModalVisible(false);
+  };
+
+  const handleClose = () => {
+    setSuccessModalVisible(false);
+    navigation.replace('MainTab');
+  };
+
+  const updateData = async (d, status) => {
     try {
-      console.log('dose: ', d.upcomingSchedules[0]);
-      const upcomingSchedules = new Date(d.upcomingSchedules[0]);
-      const res = await addDose(d.id, upcomingSchedules, true);
-      console.log('res: ', res);
-      navigation.replace('MainTab');
+      if (status === 'taken') {
+        console.log('dose: ', d);
+        const res = await updateMedicineStatus(d, status);
+        setSuccessModalVisible(true);
+        console.log('res: ', res);
+        // navigation.replace('MainTab');
+      }
+      if (status === 'missed') {
+        setModalVisible(true);
+        setUId(d);
+      }
     } catch (error) {
       console.log('error: ', error);
     }
@@ -145,9 +174,22 @@ const ViewDosage = ({navigation, route}) => {
             />
             {' ' + dose.dose + ' ' + dose.type}
           </Text>
+          <Text
+            style={{
+              color: theme.COLORS.darkBlue_gradient1,
+              fontSize: 16,
+              fontWeight: 'bold',
+            }}>
+            <MaterialCommunityIcons
+              name="food"
+              color={theme.COLORS.darkBlue_gradient1}
+              size={20}
+            />
+            {' ' + dose.consumption}
+          </Text>
           <TouchableOpacity
             onPress={() => {
-              updateData(dose);
+              updateData(dose.schedule_id, 'taken');
             }}>
             <LinearGradient
               colors={[
@@ -161,12 +203,26 @@ const ViewDosage = ({navigation, route}) => {
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => {
-              navigation.replace('MainTab');
+              updateData(dose.schedule_id, 'missed');
             }}>
             <Text style={styles.btnText1}>{t('skip')}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
+      <ConfirmModalComponent
+        visible={modalVisible}
+        onClose={handleCancel}
+        onConfirm={handleConfirm}
+        title={t('deleteTitle')}
+        message={t('skipMessage')}
+        icon="❓"
+      />
+      <ModalComponent
+        visible={successModalVisible}
+        onClose={handleClose}
+        text={t('medicineTakenMessage')}
+        // page={redirect}
+      />
     </SafeAreaView>
   );
 };

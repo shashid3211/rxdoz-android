@@ -82,5 +82,12 @@
   "taken": "Taken",
   "takeNow": "Take Now",
   "skip": "Skip",
-  "warning": "Warning"
+  "warning": "Warning",
+  "confirm": "Confirm",
+  "cancel": "Cancel",
+  "deleteTitle": "Are you sure?",
+  "deleteMessage": "Do you really want to delete these records? This process cannot be undone.",
+  "skipMessage": "Do you really want to skip this medicine?",
+  "medicineTakenMessage": "Medicine has taken successfully",
+  "pleaseEnterValidDate": "Please enter valid date"
 }

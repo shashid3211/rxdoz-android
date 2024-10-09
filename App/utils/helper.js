@@ -119,3 +119,47 @@ export const dayDifference = (date1, date2) => {
   console.log('diffDays', diffDays);
   return diffDays;
 };
+
+export const convert12HourTo24Hour = time12h => {
+  console.log('time12h:', time12h);
+  // Use regex to split by any whitespace, including non-breaking spaces
+  const [time, modifier] = time12h.split(/\s+/); // Split time and AM/PM based on any space character
+  let [hours, minutes] = time.split(':').map(Number);
+  console.log('hours and min:', hours, minutes, time, modifier);
+
+  if ((modifier === 'PM' || modifier === 'pm') && hours !== 12) {
+    hours += 12; // Convert PM hours
+  } else if ((modifier === 'AM' || modifier === 'am') && hours === 12) {
+    hours = 0; // Convert midnight
+  }
+
+  return {hours, minutes};
+};
+
+export const formatTime = dateString => {
+  const date = new Date(dateString);
+
+  // Get hours and minutes
+  let hours = date.getHours();
+  const minutes = date.getMinutes();
+
+  // Determine AM/PM
+  const modifier = hours >= 12 ? 'PM' : 'AM';
+
+  // Convert hours from 24-hour to 12-hour format
+  hours = hours % 12 || 12; // if hours is 0, set it to 12
+
+  // Pad minutes with leading zero if needed
+  const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
+
+  return `${hours}:${formattedMinutes} ${modifier}`;
+};
+
+export const getNextDayTimeNow = day => {
+  const now = new Date();
+  const input = new Date(day);
+  // Return the time formatted as HH:MM
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  return new Date(input.setHours(hours, minutes, 0, 0)); // Set the time to 00:00
+};

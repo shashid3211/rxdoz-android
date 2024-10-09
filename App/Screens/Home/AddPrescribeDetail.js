@@ -10,6 +10,7 @@ import {
   Modal,
   Dimensions,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import React, {useState, useRef, useEffect} from 'react';
 import {theme} from '../../Constants/theme';
@@ -24,7 +25,6 @@ import {
   launchCamera as _launchCamera,
 } from 'react-native-image-picker';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getDBConnection,
   getDosage,
@@ -40,6 +40,8 @@ import RNFS from 'react-native-fs';
 import ModalComponent from '../../Components/UI/ModalComponent';
 import ErrorModelComponent from '../../Components/UI/ErrorModelComponent';
 import {useTranslation} from 'react-i18next';
+import LoadingModalComponent from '../../Components/UI/LoadingModalComponent';
+import {convert12HourTo24Hour} from '../../utils/helper';
 
 let launchImageLibrary = _launchImageLibrary;
 let launchCamera = _launchCamera;
@@ -56,7 +58,6 @@ const AddPrescribeDetail = ({navigation, route}) => {
   const [medType, setMedType] = useState(null);
   const [medFreq, setMedFreq] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
-  const [selectedImageBase64, setSelectedImageBase64] = useState(null);
   const [selectFromDate, setSelectFromDate] = useState(new Date());
   const [openCalender1, setOpenCalender1] = useState(false);
   const [selectToDate, setSelectToDate] = useState(new Date());
@@ -71,9 +72,7 @@ const AddPrescribeDetail = ({navigation, route}) => {
   const [selectLTime, setSelectLTime] = useState(new Date());
   const [selectDTime, setSelectDTime] = useState(new Date());
   const [defaultSet, setDefaultSet] = useState(null);
-  const [medSchedules, setMedSchedules] = useState(
-    useState(Array(frequency).fill(new Date())),
-  );
+  const [medSchedules, setMedSchedules] = useState([]);
   const [openCalendars, setOpenCalendars] = useState(Array(1).fill(false));
   const [medId, setMedId] = useState(null);
   const [confirm, setConfirm] = useState(false);
@@ -81,6 +80,7 @@ const AddPrescribeDetail = ({navigation, route}) => {
   const [errorText, setErrorText] = useState(null);
   const [redirect, setRedirect] = useState(false);
   const [page, setPage] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const ref = useRef(null);
   console.log('Params: ', route.params);
@@ -101,14 +101,15 @@ const AddPrescribeDetail = ({navigation, route}) => {
       setSelectFromDate(new Date(item.from_date));
       setSelectToDate(new Date(item.to_date));
       setMedId(item.id);
-      // setMedSchedules(item.schedule_times);
       let img = value.photo;
       img && setSelectedImage(img.replace('file://', ''));
       const schedules = item.schedule_times;
-      const dates = schedules.map(schedule => new Date(schedule));
-
+      const dates = schedules.map(
+        schedule => new Date(convertTimeToDate(schedule)),
+      );
       console.log(dates);
-      setMedSchedules([...dates]);
+      setMedSchedules(dates);
+      console.log(medSchedules);
     } else if (route.params.item_detail) {
       setDefaultSet(route.params.item_detail);
       console.log(route.params);
@@ -120,13 +121,13 @@ const AddPrescribeDetail = ({navigation, route}) => {
       setHospName(route.params.h_name);
       setPrescribId(route.params.id);
     }
-    console.log('Form Date: ', medSchedules);
-
-    getData();
-  }, [route.params]);
+  }, []);
+  const prevMedSchedules = useRef(medSchedules);
 
   useEffect(() => {
-    const updatedSelectTimes = medSchedules.map(schedule => new Date(schedule));
+    console.log('Form Date: ', medSchedules);
+
+    const updatedSelectTimes = [...medSchedules];
     const updatedOpenCalendars = [...openCalendars];
     console.log('Select Times: ', updatedSelectTimes);
 
@@ -135,14 +136,20 @@ const AddPrescribeDetail = ({navigation, route}) => {
         updatedSelectTimes.push(new Date());
         updatedOpenCalendars.push(false);
       }
-    }
-    // If the new medFreq is less, remove excess times
-    else if (medFreq < medSchedules.length) {
+    } else if (medFreq < medSchedules.length) {
       updatedSelectTimes.splice(medFreq);
       updatedOpenCalendars.splice(medFreq);
     }
 
-    setMedSchedules(updatedSelectTimes);
+    // Compare with the previous medSchedules using useRef
+    if (
+      JSON.stringify(prevMedSchedules.current) !==
+      JSON.stringify(updatedSelectTimes)
+    ) {
+      setMedSchedules(updatedSelectTimes);
+      prevMedSchedules.current = updatedSelectTimes; // Update ref to track new state
+    }
+
     setOpenCalendars(updatedOpenCalendars);
   }, [medFreq]);
 
@@ -159,21 +166,6 @@ const AddPrescribeDetail = ({navigation, route}) => {
         },
       },
     });
-
-  const getData = async () => {
-    try {
-      const jsonValue = await AsyncStorage.getItem('schedule');
-      if (jsonValue != null) {
-        const data = JSON.parse(jsonValue);
-        setSelectWTime(new Date(data.wakeTime));
-        setSelectLTime(new Date(data.lunchTime));
-        setSelectDTime(new Date(data.dinnerTime));
-        setSelectBTime(new Date(data.bedTime));
-      }
-    } catch (e) {
-      // error reading value
-    }
-  };
 
   const stickyHeaderHeight = 60;
   const windowHeight = Dimensions.get('window').height;
@@ -380,106 +372,150 @@ const AddPrescribeDetail = ({navigation, route}) => {
     if (page) navigation.navigate('TreatmentScreen');
   };
 
+  function convertTimeToDate(timeString) {
+    // Get the current date
+    const date = new Date();
+    const {hours, minutes} = convert12HourTo24Hour(timeString);
+
+    // Set hours and minutes to the date
+    date.setHours(hours);
+    date.setMinutes(minutes);
+    date.setSeconds(0);
+    date.setMilliseconds(0);
+
+    // Convert it to ISO string
+    const isoString = date.toISOString();
+    return isoString;
+  }
+
   const handleSubmit = async (event, set = '') => {
     event.preventDefault();
-    // if (selectedImage == null) {
-    //   Alert.alert('Please select medicine photo.');
-    //   return;
-    // }
-    // console.log('Schedules: ', medSchedules);
-    console.log('Submited Data: ', selectFromDate.toISOString().split('T')[0]);
 
-    if (medName === null || medName === '') {
-      setMedNameErr(true);
-      // const msg = t('pleaseEnterMedicineName')
-      setErrorText(t('pleaseEnterMedicineName'));
-      setError(true);
-      return;
-    }
-    if (dose === null || dose === '') {
-      setErrorText(t('pleaseEnterDosage'));
-      setError(true);
+    try {
+      setLoading(true);
+      if (medName === null || medName === '') {
+        setMedNameErr(true);
+        // const msg = t('pleaseEnterMedicineName')
+        setErrorText(t('pleaseEnterMedicineName'));
+        setError(true);
+        return;
+      }
+      if (dose === null || dose === '') {
+        setErrorText(t('pleaseEnterDosage'));
+        setError(true);
 
-      return;
-    }
-    if (medType === null || medType === '') {
-      setErrorText(t('pleaseEnterType'));
-      setError(true);
+        return;
+      }
+      if (medType === null || medType === '') {
+        setErrorText(t('pleaseEnterType'));
+        setError(true);
 
-      return;
-    }
-    if (medFreq === null) {
-      setErrorText(t('pleaseEnterFrequency'));
-      setError(true);
+        return;
+      }
+      if (medFreq === null) {
+        setErrorText(t('pleaseEnterFrequency'));
+        setError(true);
 
-      return;
-    }
-    if (con_detail == null) {
-      setErrorText(t('pleaseEnterConsumptionDetail'));
-      setError(true);
+        return;
+      }
+      if (con_detail == null) {
+        setErrorText(t('pleaseEnterConsumptionDetail'));
+        setError(true);
 
-      return;
-    }
+        return;
+      }
 
-    console.log('Schedules: ', medSchedules);
-    let res;
-    if (route.params.edit) {
-      res = await updateMedicine(
-        medId,
-        prescribId,
-        medName,
-        '',
-        selectFromDate,
-        selectToDate,
-        medFreq,
-        dose,
-        con_detail,
-        medType,
-        '',
-        selectedImage,
-        medSchedules,
-      );
-    } else {
-      res = await addMedicine(
-        prescribId,
-        medName,
-        '',
-        selectFromDate,
-        selectToDate,
-        medFreq,
-        dose,
-        con_detail,
-        medType,
-        '',
-        selectedImage,
-        medSchedules,
-      );
-    }
-    if (res) {
-      if (set === 'add') {
-        setRedirect(true);
-        setMedName(null);
-        setMedFreq(null);
-        setMedType(null);
-        setCon_detail(null);
-        setDose(null);
-        setSelectedImage(null);
-        setMedSchedules(Array(frequency).fill(new Date()));
-        setSelectFromDate(new Date());
-        setSelectToDate(new Date());
-        setOpenCalendars(Array(frequency).fill(false));
-        setPage(false);
-        setConfirm(true);
-      } else {
+      // console.log('Schedules: ', medSchedules);
+      let res;
+      if (route.params.edit) {
+        res = await updateMedicine(
+          medId,
+          medName,
+          '',
+          selectFromDate.toISOString().split('T')[0],
+          selectToDate.toISOString().split('T')[0],
+          medFreq,
+          dose,
+          con_detail,
+          medType,
+          '',
+          selectedImage,
+          medSchedules.map(schedule =>
+            schedule.toLocaleString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          ),
+          t,
+        );
+        // console.log('Button Status: ', res);
         setPage(true);
         setConfirm(true);
+        // console.log('Confirm Status:', confirm);
+      } else {
+        res = await addMedicine(
+          prescribId,
+          medName,
+          '',
+          selectFromDate.toISOString().split('T')[0],
+          selectToDate.toISOString().split('T')[0],
+          medFreq,
+          dose,
+          con_detail,
+          medType,
+          '',
+          selectedImage,
+          medSchedules.map(schedule =>
+            schedule.toLocaleString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          ),
+          t,
+        );
+        if (res) {
+          if (set === 'add') {
+            setRedirect(true);
+            setMedName(null);
+            setMedFreq(null);
+            setMedType(null);
+            setCon_detail(null);
+            setDose(null);
+            setSelectedImage(null);
+            setMedSchedules(Array(frequency).fill(new Date()));
+            setSelectFromDate(new Date());
+            setSelectToDate(new Date());
+            setOpenCalendars(Array(frequency).fill(false));
+            setPage(false);
+            setConfirm(true);
+          } else {
+            setPage(true);
+            setConfirm(true);
+          }
+        }
       }
+    } catch (error) {
+      console.log('Error: ', error);
+    } finally {
+      setLoading(false);
     }
-    console.log('Button Status: ', set);
+
+    // console.log('Button Status: ', set);
+  };
+
+  const callDateError = () => {
+    setErrorText(t('pleaseEnterValidDate'));
+    setError(true);
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      <Modal visible={loading} transparent={true} animationType="none">
+        <View style={styles.overlay}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </Modal>
       <Animated.ScrollView
         onScroll={onScroll}
         contentContainerStyle={{
@@ -584,7 +620,7 @@ const AddPrescribeDetail = ({navigation, route}) => {
         />
         <DatePickerFullComponent
           onPress={() => setOpenCalender1(true)}
-          value={selectFromDate.toISOString().split('T')[0]}
+          value={selectFromDate.toDateString()}
           onChangeText={t => setSelectFromDate(t)}
           label={t('fromDate')}
           onConfirm={date => {
@@ -600,12 +636,16 @@ const AddPrescribeDetail = ({navigation, route}) => {
         />
         <DatePickerFullComponent
           onPress={() => setOpenCalender2(true)}
-          value={selectToDate.toISOString().split('T')[0]}
+          value={selectToDate.toDateString()}
           onChangeText={t => setSelectToDate(t)}
           label={t('toDate')}
           onConfirm={date => {
+            if (new Date(date) >= new Date(selectFromDate)) {
+              setSelectToDate(date);
+            } else {
+              callDateError();
+            }
             setOpenCalender2(false);
-            setSelectToDate(date);
           }}
           onCancel={() => setOpenCalender2(false)}
           openCalender={openCalender2}
@@ -662,7 +702,7 @@ const AddPrescribeDetail = ({navigation, route}) => {
               key={index}
               onPress={() => handleCalendarOpen(index, true)}
               value={
-                medSchedules[index]?.toLocaleTimeString([], {
+                medSchedules[index]?.toLocaleString([], {
                   hour: '2-digit',
                   minute: '2-digit',
                 }) || ''
@@ -792,19 +832,24 @@ const AddPrescribeDetail = ({navigation, route}) => {
               </Text>
             </TouchableOpacity>
           </View>
-          <ModalComponent
-            visible={confirm}
-            onClose={modalResponse}
-            text={t('reminderCreatedSuccessfully')}
-            page={redirect}
-          />
-          <ErrorModelComponent
-            visible={error}
-            onClose={() => setError(false)}
-            text={errorText}
-          />
         </Animated.View>
       )}
+      <ModalComponent
+        visible={confirm}
+        onClose={modalResponse}
+        text={t('reminderCreatedSuccessfully')}
+        page={redirect}
+      />
+      <ErrorModelComponent
+        visible={error}
+        onClose={() => setError(false)}
+        text={errorText}
+      />
+      <LoadingModalComponent
+        visible={loading}
+        onClose={() => setError(false)}
+        text={errorText}
+      />
     </SafeAreaView>
   );
 };
@@ -812,6 +857,9 @@ const AddPrescribeDetail = ({navigation, route}) => {
 export default AddPrescribeDetail;
 
 const styles = StyleSheet.create({
+  indicator: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: theme.COLORS.white,

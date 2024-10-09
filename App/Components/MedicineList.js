@@ -7,6 +7,7 @@ import {theme} from '../Constants/theme';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import {createPDF} from '../utils/helper';
 import {useTranslation} from 'react-i18next';
+import {formatTime} from '../utils/helper';
 
 const MedicineList = ({
   personDosage,
@@ -27,6 +28,7 @@ const MedicineList = ({
     <Animated.FlatList
       showsVerticalScrollIndicator={false}
       data={personDosage}
+      keyExtractor={item => item.schedule_time}
       ListHeaderComponent={() => {
         return <Text style={styles.title}>{header}</Text>;
       }}
@@ -153,10 +155,8 @@ const MedicineList = ({
                     borderRadius: 4,
                     color: theme.COLORS.darkBlue_gradient2,
                   }}>
-                  {new Date(item.upcomingSchedules[0]).toLocaleString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {/* {new Date(item.schedule_time)} */}
+                  {formatTime(item.schedule_time)}
                 </Text>
               </View>
               <Divider style={{backgroundColor: 'white'}} />
@@ -263,7 +263,7 @@ const MedicineList = ({
           </TouchableOpacity>
         );
       }}
-      keyExtractor={item => item.id}
+      // keyExtractor={item => item.id}
       style={{marginVertical: 20}}
     />
   );

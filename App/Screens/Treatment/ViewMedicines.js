@@ -19,9 +19,25 @@ import {
 } from '../../Services/DatabaseService';
 import PrescriptionMedicineList from '../../Components/PrescriptionMedicineList';
 import {useTranslation} from 'react-i18next';
+import ConfirmModalComponent from '../../Components/UI/ConfirmModalComponent';
 
 const ViewMedicines = ({navigation, route}) => {
+  const [modalVisible, setModalVisible] = useState(false);
+  const [deleteId, setDeleteId] = useState(null);
   const {t} = useTranslation();
+
+  const handleConfirm = async () => {
+    const res = await deleteMedicine(deleteId); // Assume this function deletes a prescription by ID.
+    if (res) {
+      navigation.navigate('TreatmentScreen'); // Re-fetch the updated prescription list after deletion.
+    }
+    setModalVisible(false);
+  };
+
+  const handleCancel = () => {
+    setModalVisible(false);
+  };
+
   const [prescribe, setPrescrib] = useState(null);
   const [medicines, setMedicines] = useState(null);
   useEffect(() => {
@@ -34,7 +50,7 @@ const ViewMedicines = ({navigation, route}) => {
     try {
       const res = await getMedicinesAndSchedulesByPrescriptionId(id);
       setMedicines(res);
-      console.log('res Medicine', res);
+      // console.log('res Medicine', JSON.stringify(res));
     } catch (error) {
       console.log('error: ', error);
     }
@@ -42,10 +58,8 @@ const ViewMedicines = ({navigation, route}) => {
 
   const handleDelete = async id => {
     try {
-      const res = await deleteMedicine(id);
-      if (res) {
-        navigation.navigate('TreatmentScreen');
-      }
+      setDeleteId(id);
+      setModalVisible(true);
     } catch (error) {
       console.log('error: ', error);
     }
@@ -86,6 +100,14 @@ const ViewMedicines = ({navigation, route}) => {
           </TouchableOpacity>
         </View>
       )}
+      <ConfirmModalComponent
+        visible={modalVisible}
+        onClose={handleCancel}
+        onConfirm={handleConfirm}
+        title={t('deleteTitle')}
+        message={t('deleteMessage')}
+        icon="❌"
+      />
     </SafeAreaView>
   );
 };

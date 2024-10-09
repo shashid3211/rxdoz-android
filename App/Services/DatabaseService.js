@@ -1,13 +1,11 @@
 import {enablePromise, openDatabase} from 'react-native-sqlite-storage';
 import {format} from 'date-fns';
-import {dayDifference} from '../utils/helper';
-
-// Open a connection to the database
-// const db = SQLite.openDatabase(
-//   {name: 'medicine_reminder.db', location: 'default'},
-//   () => console.log('Database opened successfully'),
-//   error => console.log('Database error: ', error),
-// );
+import {
+  dayDifference,
+  convert12HourTo24Hour,
+  getNextDayTimeNow,
+} from '../utils/helper';
+import {scheduleNotification, cancelNotification} from './NotifyService';
 
 enablePromise(true);
 
@@ -70,12 +68,21 @@ const initializeDatabase = async () => {
         type TEXT,
         instruction TEXT,
         photo TEXT,
-        schedule_time TEXT,
+        times TEXT,
         FOREIGN KEY (prescription_id) REFERENCES prescription(id)
       );
     `);
 
-    // await db.executeSql('DROP TABLE IF EXISTS dosage;');
+    await db.executeSql(`
+      CREATE TABLE IF NOT EXISTS schedule (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        medicine_id INTEGER,
+        schedule_time TEXT,
+        status TEXT,
+        FOREIGN KEY (medicine_id) REFERENCES medicine(id))`);
+
+    // await db.executeSql('DROP TABLE IF EXISTS schedule;');
+    // await db.executeSql('DROP TABLE IF EXISTS medicine;');
 
     await db.executeSql(`
       CREATE TABLE IF NOT EXISTS dosage (
@@ -91,175 +98,6 @@ const initializeDatabase = async () => {
     console.log('Tables created successfully');
   } catch (error) {
     console.error('Error initializing database:', error);
-  }
-};
-
-// add Dose
-const addDose = async (medicineId, dosageTime, taken) => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-    const todayDate = new Date().toISOString().split('T')[0];
-
-    const results = await db.executeSql(
-      `
-        INSERT INTO dosage (medicine_id, dosage_time, taken, taken_date)
-        VALUES (?, ?, ?, ?);
-      `,
-      [medicineId, dosageTime.toISOString(), taken, todayDate],
-    );
-
-    return results;
-  } catch (error) {
-    console.error('Error adding dose:', error);
-  }
-};
-
-// Update Dose
-const updateDose = async (id, medicineId, dosageTime, taken) => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-
-    const results = await db.executeSql(
-      `
-        UPDATE dosage
-        SET medicine_id = ?, dosage_time = ?, taken = ?
-        WHERE id = ?;
-      `,
-      [medicineId, dosageTime.toISOString(), taken, id],
-    );
-
-    return results;
-  } catch (error) {
-    console.error('Error updating dose:', error);
-  }
-};
-
-const getDoseTakenCount = async () => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-
-    const results = await db.executeSql(
-      `
-        SELECT COUNT(*) AS count
-        FROM dosage
-        WHERE taken = 1;
-      `,
-      [],
-    );
-
-    if (results[0].rows.length > 0) {
-      return results[0].rows.item(0).count;
-    } else {
-      return 0;
-    }
-  } catch (error) {
-    console.error('Error getting dose taken count:', error);
-    throw error;
-  }
-};
-
-const getMissedDosages = async () => {
-  const db = await getDBConnection();
-  await initializeDatabase();
-
-  try {
-    const medicines = await db.executeSql(`SELECT * FROM medicine;`);
-
-    let missedDosages = [];
-
-    for (const medicineRow of medicines[0].rows.raw()) {
-      const {id, from_date, to_date, schedule_time} = medicineRow;
-      const schedule = JSON.parse(schedule_time); // Assuming schedule_time is a JSON string
-
-      const fromDate = new Date(from_date);
-      const toDate = new Date(to_date);
-
-      for (
-        let currentDate = new Date(fromDate);
-        currentDate <= toDate;
-        currentDate.setDate(currentDate.getDate() + 1)
-      ) {
-        const formattedDate = currentDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-
-        for (const time of schedule) {
-          const scheduledTime = `${formattedDate} ${time}`;
-
-          const dosageResult = await db.executeSql(
-            `SELECT * FROM dosage WHERE medicine_id = ? AND dosage_time = ? AND taken = 1;`,
-            [id, scheduledTime],
-          );
-
-          if (dosageResult[0].rows.length === 0) {
-            missedDosages.push({
-              medicine_id: id,
-              scheduledTime,
-            });
-          }
-        }
-      }
-    }
-
-    return missedDosages;
-  } catch (error) {
-    console.error('Error getting missed dosages:', error);
-    throw error;
-  }
-};
-
-// Get Dose
-const getDoseNotTakenCount = async () => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-
-    const results = await db.executeSql(
-      `
-        SELECT COUNT(*) AS count
-        FROM dosage
-        WHERE taken = 0;
-      `,
-      [],
-    );
-
-    if (results[0].rows.length > 0) {
-      return results[0].rows.item(0).count;
-    } else {
-      return 0;
-    }
-  } catch (error) {
-    console.error('Error getting dose not taken count:', error);
-    throw error;
-  }
-};
-
-const getDosageDetails = async () => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-
-    const now = new Date(); // Current date and time
-    const results = await db.executeSql(
-      `
-      SELECT id, medicine_id, dosage_time, taken, taken_date
-      FROM dosage;
-      `,
-    );
-
-    const dosageRecords = [];
-    const rows = results[0].rows;
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows.item(i);
-      dosageRecords.push(row);
-    }
-
-    return dosageRecords;
-  } catch (error) {
-    console.error('Error fetching dosage details:', error);
-    throw error;
   }
 };
 
@@ -404,14 +242,16 @@ const addMedicine = async (
   instruction,
   photo,
   scheduleTime,
+  t,
 ) => {
   try {
     const db = await getDBConnection();
     await initializeDatabase();
+    console.log(scheduleTime, 'fromDate');
 
     const results = await db.executeSql(
       `
-      INSERT INTO medicine (prescription_id, name, description, from_date, to_date, frequency, dose, consumption, type, instruction, photo, schedule_time)
+      INSERT INTO medicine (prescription_id, name, description, from_date, to_date, frequency, dose, consumption, type, instruction, photo, times )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `,
       [
@@ -429,6 +269,44 @@ const addMedicine = async (
         JSON.stringify(scheduleTime), // Convert array to JSON string
       ],
     );
+    const startDate = new Date(fromDate);
+    const endDate = new Date(toDate);
+    const medicineId = results[0].insertId;
+    const currentDate = startDate;
+    while (currentDate <= endDate) {
+      for (let i = 0; i < scheduleTime.length; i++) {
+        const time = scheduleTime[i];
+        console.log(time, 'time');
+        const {hours, minutes} = convert12HourTo24Hour(time);
+        const notificationTime = new Date(currentDate);
+        console.log('Hours and Min: ', hours, minutes);
+        console.log(notificationTime, 'notificationTime');
+        notificationTime.setHours(hours, minutes, 0, 0);
+        console.log(notificationTime, 'notificationTime');
+
+        const res = await db.executeSql(
+          `
+          INSERT INTO schedule (medicine_id, schedule_time, status)
+          VALUES (?, ?, ?);
+        `,
+          [medicineId, notificationTime, 'pending'],
+        );
+        console.log(res);
+        console.log(notificationTime);
+        const scheduleId = res[0].insertId;
+        await scheduleNotification(
+          medicineId,
+          scheduleId,
+          name,
+          notificationTime,
+          t,
+        );
+      }
+
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    for (let i = 0; i < scheduleTime.length; i++) {}
     return results[0].insertId;
   } catch (error) {
     console.error('Error adding medicine:', error);
@@ -440,346 +318,107 @@ const addMedicine = async (
 const getMedicinesAndSchedulesByPrescriptionId = async prescriptionId => {
   try {
     const db = await getDBConnection();
-    await initializeDatabase();
 
     const results = await db.executeSql(
       `
-      SELECT 
-        id as medicine_id,
-        name,
-        description,
-        from_date,
-        to_date,
-        frequency,
-        dose,
-        consumption,
-        type,
-        instruction,
-        photo,
-        schedule_time
-      FROM 
-        medicine
-      WHERE 
-        prescription_id = ?;
-      `,
+      SELECT m.id, m.name, m.description, m.from_date, m.to_date, m.frequency, 
+             m.dose, m.consumption, m.type, m.instruction, m.photo, m.times,
+             s.schedule_time, s.status
+      FROM medicine m
+      LEFT JOIN schedule s ON m.id = s.medicine_id
+      WHERE m.prescription_id = ?
+      ORDER BY m.id, s.schedule_time;
+    `,
       [prescriptionId],
     );
 
     const medicines = [];
-    const rows = results[0].rows;
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows.item(i);
-      medicines.push({
-        id: row.medicine_id,
-        name: row.name,
-        description: row.description,
-        from_date: row.from_date,
-        to_date: row.to_date,
-        frequency: row.frequency,
-        dose: row.dose,
-        consumption: row.consumption,
-        type: row.type,
-        instruction: row.instruction,
-        photo: row.photo,
-        schedule_times: JSON.parse(row.schedule_time), // Parse JSON string back to array
-      });
-    }
 
-    return medicines;
-  } catch (error) {
-    console.error('Error fetching medicines and schedules:', error);
-    throw error;
-  }
-};
+    // Process the results to group schedules by medicine
+    for (let i = 0; i < results[0].rows.length; i++) {
+      const row = results[0].rows.item(i);
+      const medicineIndex = medicines.findIndex(m => m.id === row.id);
 
-// Get medicine details By ID
-const getMedicineDetails = async medicineId => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-
-    const results = await db.executeSql(
-      `
-      SELECT * FROM medicine WHERE id = ?;
-    `,
-      [medicineId],
-    );
-    return results[0].rows.item(0);
-  } catch (error) {
-    console.error('Error fetching medicine details:', error);
-    throw error;
-  }
-};
-
-// Get Upcomming Medicine
-const getUpcomingMedicinesAll = async () => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-
-    const now = new Date(); // Current date and time
-    const results = await db.executeSql(
-      `
-      SELECT id, name, description, from_date, to_date, frequency, dose, consumption, type, instruction, photo, schedule_time
-      FROM medicine;
-      `,
-    );
-
-    const medicines = [];
-    const rows = results[0].rows;
-
-    // Function to check if any dosage is taken for the given medicine ID and schedule time
-    const isDosageTaken = async (medicineId, dosageTime) => {
-      const dosageResults = await db.executeSql(
-        `
-        SELECT COUNT(*) AS takenCount
-        FROM dosage
-        WHERE medicine_id = ?
-          AND dosage_time = ?
-          AND taken = ?
-          AND DATE(taken_date) = DATE(?);
-        `,
-        [
-          medicineId,
-          dosageTime.toISOString(),
-          1,
-          new Date().toISOString().split('T')[0],
-        ], // Get today's date in YYYY-MM-DD format
-      );
-
-      const takenCount = dosageResults[0].rows.item(0).takenCount;
-      console.log('takenCount', dosageResults[0].rows.item(0));
-      return takenCount > 0;
-    };
-
-    // Function to extract time part from a date string
-    const extractTimeFromDate = dateString => {
-      const date = new Date(dateString);
-      return date.toTimeString().split(' ')[0]; // HH:MM:SS
-    };
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows.item(i);
-      const scheduleTimes = JSON.parse(row.schedule_time); // Parse JSON string
-
-      const upcomingSchedules = [];
-
-      for (const scheduleTime of scheduleTimes) {
-        const scheduleDate = new Date(scheduleTime);
-        const scheduleTimeOnly = extractTimeFromDate(scheduleTime);
-
-        // Check if schedule is upcoming
-        if (scheduleTimeOnly >= now.toTimeString().split(' ')[0]) {
-          // Check if the dosage has already been taken
-          const taken = await isDosageTaken(row.id, scheduleDate);
-          if (!taken) {
-            upcomingSchedules.push(scheduleTime);
-          }
-        }
-      }
-
-      if (upcomingSchedules.length > 0) {
+      if (medicineIndex === -1) {
+        // If medicine is not in the array, add it
         medicines.push({
-          ...row,
-          upcomingSchedules, // Add upcoming schedules to medicine
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          from_date: row.from_date,
+          to_date: row.to_date,
+          frequency: row.frequency,
+          dose: row.dose,
+          consumption: row.consumption,
+          type: row.type,
+          instruction: row.instruction,
+          photo: row.photo,
+          schedule_times: JSON.parse(row.times),
+          schedules: [
+            {
+              schedule_time: row.schedule_time,
+              status: row.status,
+            },
+          ],
+        });
+      } else {
+        // If medicine already exists, just add the schedule
+        medicines[medicineIndex].schedules.push({
+          schedule_time: row.schedule_time,
+          status: row.status,
         });
       }
     }
 
-    // Sort medicines by the earliest upcoming schedule
-    medicines.sort((a, b) => {
-      const aUpcoming = a.upcomingSchedules[0]
-        ? new Date(a.upcomingSchedules[0])
-        : new Date(0);
-      const bUpcoming = b.upcomingSchedules[0]
-        ? new Date(b.upcomingSchedules[0])
-        : new Date(0);
-      return aUpcoming - bUpcoming;
-    });
-
     return medicines;
   } catch (error) {
-    console.error('Error fetching upcoming medicines:', error);
+    console.error('Error fetching medicines by prescription ID:', error);
     throw error;
   }
 };
 
-const getUpcomingMedicines = async date => {
+const getUpcomingMedicines = async (date, next = false) => {
   try {
     const db = await getDBConnection();
-    await initializeDatabase();
 
-    const now = new Date();
-    const inputDate = new Date(date); // Use the provided date
-    const dateString = inputDate.toISOString().split('T')[0]; // Format date as 'YYYY-MM-DD'
+    const nextDayTime = getNextDayTimeNow(date);
+    const inputDate = new Date(date);
+    inputDate.setHours(23, 59, 999, 0);
+    if (next) {
+      nextDayTime.setHours(0, 0, 0, 0);
+    }
 
-    const results = await db.executeSql(
-      `
-      SELECT id, name, description, from_date, to_date, frequency, dose, consumption, type, instruction, photo, schedule_time
-      FROM medicine;
-      `,
-    );
+    const query = `
+      SELECT m.*, s.schedule_time, s.status, s.id as schedule_id
+      FROM medicine m
+      JOIN schedule s ON m.id = s.medicine_id
+      ORDER BY s.schedule_time ASC
+    `;
 
+    const results = await db.executeSql(query);
     const medicines = [];
-    const rows = results[0].rows;
 
-    const isDosageTaken = async (medicineId, dosageTime) => {
-      const dosageResults = await db.executeSql(
-        `
-        SELECT COUNT(*) AS takenCount
-        FROM dosage
-        WHERE medicine_id = ? 
-          AND dosage_time = ? 
-          AND taken = ?
-          AND DATE(taken_date) = DATE(?);
-        `,
-        [medicineId, dosageTime.toISOString(), 1, dateString],
-      );
+    // Loop through the results
+    results.forEach(result => {
+      for (let i = 0; i < result.rows.length; i++) {
+        const medicine = result.rows.item(i);
+        console.log('Results: ', medicine);
 
-      const takenCount = dosageResults[0].rows.item(0).takenCount;
-      console.log('takenCount', dosageResults[0].rows.item(0));
-      return takenCount > 0;
-    };
-
-    const extractTimeFromDate = dateString => {
-      const date = new Date(dateString);
-      return date.toTimeString().split(' ')[0];
-    };
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows.item(i);
-      const scheduleTimes = JSON.parse(row.schedule_time);
-
-      const upcomingSchedules = [];
-
-      for (const scheduleTime of scheduleTimes) {
-        const scheduleDate = new Date(scheduleTime);
-        const scheduleTimeOnly = extractTimeFromDate(scheduleTime);
-
+        // Parse the schedule_time into a Date object
+        const scheduleTime = new Date(medicine.schedule_time);
         if (
-          scheduleDate > now ||
-          scheduleDate.toISOString().split('T')[0] !==
-            now.toISOString().split('T')[0] ||
-          scheduleTimeOnly >= now.toTimeString().split(' ')[0]
+          new Date(scheduleTime) < inputDate &&
+          new Date(scheduleTime) > nextDayTime &&
+          medicine.status === 'pending'
         ) {
-          const taken = await isDosageTaken(row.id, scheduleDate);
-          if (!taken) {
-            upcomingSchedules.push(scheduleTime);
-          }
+          medicines.push(medicine);
         }
       }
-
-      if (upcomingSchedules.length > 0) {
-        medicines.push({
-          ...row,
-          upcomingSchedules,
-        });
-      }
-    }
-
-    medicines.sort((a, b) => {
-      const aUpcoming = a.upcomingSchedules[0]
-        ? new Date(a.upcomingSchedules[0])
-        : new Date(0);
-      const bUpcoming = b.upcomingSchedules[0]
-        ? new Date(b.upcomingSchedules[0])
-        : new Date(0);
-      return aUpcoming - bUpcoming;
     });
-
+    // console.log('medicines', medicines);
     return medicines;
   } catch (error) {
-    console.error('Error fetching upcoming medicines:', error);
-    throw error;
-  }
-};
-
-const getMissedMedicines = async date => {
-  try {
-    const db = await getDBConnection();
-    await initializeDatabase();
-
-    const now = new Date();
-    const inputDate = new Date(date); // Use the provided date
-    const dateString = inputDate.toISOString().split('T')[0]; // Format date as 'YYYY-MM-DD'
-
-    const results = await db.executeSql(
-      `
-        SELECT id, name, description, from_date, to_date, frequency, dose, consumption, type, instruction, photo, schedule_time
-        FROM medicine;
-        `,
-    );
-
-    const medicines = [];
-    const rows = results[0].rows;
-
-    const isDosageTaken = async (medicineId, dosageTime) => {
-      const dosageResults = await db.executeSql(
-        `
-          SELECT COUNT(*) AS takenCount
-          FROM dosage
-          WHERE medicine_id = ? 
-            AND dosage_time = ? 
-            AND taken = ?
-            AND DATE(taken_date) = DATE(?);
-          `,
-        [medicineId, dosageTime.toISOString(), 1, dateString],
-      );
-
-      const takenCount = dosageResults[0].rows.item(0).takenCount;
-      console.log('takenCount', dosageResults[0].rows.item(0));
-      return takenCount > 0;
-    };
-
-    const extractTimeFromDate = dateString => {
-      const d = new Date(dateString);
-      return d.toTimeString().split(' ')[0];
-    };
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows.item(i);
-      const scheduleTimes = JSON.parse(row.schedule_time);
-
-      const upcomingSchedules = [];
-
-      for (const scheduleTime of scheduleTimes) {
-        const scheduleDate = new Date(scheduleTime);
-        const scheduleTimeOnly = extractTimeFromDate(scheduleTime);
-        console.log('Misside Condition: ', now >= new Date(row.from_date));
-
-        if (
-          now >= new Date(row.from_date) &&
-          scheduleTimeOnly < now.toTimeString().split(' ')[0]
-        ) {
-          console.log('missed', scheduleTime);
-          const taken = await isDosageTaken(row.id, scheduleDate);
-          if (!taken) {
-            upcomingSchedules.push(scheduleTime);
-          }
-        }
-      }
-
-      if (upcomingSchedules.length > 0) {
-        medicines.push({
-          ...row,
-          upcomingSchedules,
-        });
-      }
-    }
-
-    medicines.sort((a, b) => {
-      const aUpcoming = a.upcomingSchedules[0]
-        ? new Date(a.upcomingSchedules[0])
-        : new Date(0);
-      const bUpcoming = b.upcomingSchedules[0]
-        ? new Date(b.upcomingSchedules[0])
-        : new Date(0);
-      return aUpcoming - bUpcoming;
-    });
-
-    return medicines;
-  } catch (error) {
-    console.error('Error fetching upcoming medicines:', error);
+    console.error('Error fetching today’s upcoming medicines:', error);
     throw error;
   }
 };
@@ -876,8 +515,7 @@ const updatePrescription = async (
 
 // Update Medicine
 const updateMedicine = async (
-  id,
-  prescriptionId,
+  medicineId,
   name,
   description,
   fromDate,
@@ -888,47 +526,22 @@ const updateMedicine = async (
   type,
   instruction,
   photo,
-  schedule_time,
+  scheduleTime,
+  t,
 ) => {
-  console.log(
-    'Data For Update: ',
-    id,
-    prescriptionId,
-    name,
-    description,
-    fromDate,
-    toDate,
-    frequency,
-    dose,
-    consumption,
-    type,
-    instruction,
-    photo,
-    schedule_time,
-  );
   try {
+    console.log('scheduleTime', scheduleTime);
     const db = await getDBConnection();
     await initializeDatabase();
 
     await db.executeSql(
       `
-      UPDATE medicine SET 
-        prescription_id = ?, 
-        name = ?, 
-        description = ?, 
-        from_date = ?, 
-        to_date = ?, 
-        frequency = ?, 
-        dose = ?, 
-        consumption = ?, 
-        type = ?, 
-        instruction = ?, 
-        photo = ?,
-        schedule_time = ?
+      UPDATE medicine 
+      SET name = ?, description = ?, from_date = ?, to_date = ?, frequency = ?, 
+          dose = ?, consumption = ?, type = ?, instruction = ?, photo = ?, times = ?
       WHERE id = ?;
     `,
       [
-        prescriptionId,
         name,
         description,
         fromDate,
@@ -939,11 +552,65 @@ const updateMedicine = async (
         type,
         instruction,
         photo,
-        JSON.stringify(schedule_time), // Convert array to JSON string
-        id,
+        JSON.stringify(scheduleTime), // Convert array to JSON string
+        medicineId,
       ],
     );
-    return id;
+    const startDate = new Date(fromDate);
+    const endDate = new Date(toDate);
+
+    const res = await db.executeSql(
+      `SELECT * FROM schedule WHERE medicine_id =?`,
+      [medicineId],
+    );
+    console.log(res);
+    const rows = res[0].rows;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows.item(i);
+      const scheduleId = row.id;
+
+      await cancelNotification(medicineId, scheduleId);
+    }
+
+    // Update schedules
+    await db.executeSql(`DELETE FROM schedule WHERE medicine_id = ?;`, [
+      medicineId,
+    ]);
+
+    const currentDate = startDate;
+    while (currentDate <= endDate) {
+      for (let i = 0; i < scheduleTime.length; i++) {
+        const time = scheduleTime[i];
+        console.log(time, 'time');
+        const {hours, minutes} = convert12HourTo24Hour(time);
+        const notificationTime = new Date(currentDate);
+        console.log('Hours and Min: ', hours, minutes);
+        console.log(notificationTime, 'notificationTime');
+        notificationTime.setHours(hours, minutes, 0, 0);
+        console.log(notificationTime, 'notificationTime');
+        const resp = await db.executeSql(
+          `
+          INSERT INTO schedule (medicine_id, schedule_time, status)
+          VALUES (?, ?, ?);
+        `,
+          [medicineId, notificationTime, 'pending'],
+        );
+        const scheduleId = resp[0].insertId;
+        console.log(resp);
+        console.log(notificationTime);
+        await scheduleNotification(
+          medicineId,
+          scheduleId,
+          name,
+          notificationTime,
+          t,
+        );
+      }
+
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return medicineId;
   } catch (error) {
     console.error('Error updating medicine:', error);
     throw error;
@@ -969,45 +636,71 @@ const deleteUser = async id => {
   }
 };
 
-// Delete Prescription
+// TODO:Delete Prescription
+// TODO: Delete Prescription
 const deletePrescription = async id => {
   try {
     const db = await getDBConnection();
     await initializeDatabase();
 
-    await db.transaction(tx => {
-      // Delete all medicines related to the prescription
-      tx.executeSql(
-        `DELETE FROM medicine WHERE prescription_id = ?;`,
-        [id],
-        (tx, result) => {
-          console.log('Medicine Delete Response: ', result);
+    await new Promise((resolve, reject) => {
+      db.transaction(async tx => {
+        try {
+          // Fetch all medicines related to the prescription to cancel notifications
+          const medicinesResult = await db.executeSql(
+            `SELECT id FROM medicine WHERE prescription_id = ?;`,
+            [id],
+          );
+
+          // Cancel notifications for each medicine
+          for (let i = 0; i < medicinesResult[0].rows.length; i++) {
+            const medicine = medicinesResult[0].rows.item(i);
+
+            // Fetch all schedules for the current medicine
+            const schedulesResult = await db.executeSql(
+              `SELECT id FROM schedule WHERE medicine_id = ?;`,
+              [medicine.id],
+            );
+
+            // Cancel notifications for each associated schedule
+            for (let j = 0; j < schedulesResult[0].rows.length; j++) {
+              const schedule = schedulesResult[0].rows.item(j);
+              await cancelNotification(medicine.id, schedule.id); // Cancel the notification
+            }
+          }
+
+          // Delete all schedules related to the prescription
+          await db.executeSql(
+            `DELETE FROM schedule WHERE medicine_id IN (SELECT id FROM medicine WHERE prescription_id = ?);`,
+            [id],
+          );
+
+          console.log('Schedules deleted successfully.');
+
+          // Delete all medicines related to the prescription
+          await db.executeSql(
+            `DELETE FROM medicine WHERE prescription_id = ?;`,
+            [id],
+          );
+
+          console.log('Medicines deleted successfully.');
 
           // Now delete the prescription itself
-          tx.executeSql(
-            `DELETE FROM prescription WHERE id = ?;`,
-            [id],
-            (tx, result) => {
-              console.log('Prescription Delete Response: ', result);
-              console.log('Successfully deleted prescription with id: ', id);
-            },
-            (tx, error) => {
-              console.error('Error deleting prescription:', error);
-              throw error;
-            },
-          );
-        },
-        (tx, error) => {
-          console.error('Error deleting medicines:', error);
-          throw error;
-        },
-      );
+          await db.executeSql(`DELETE FROM prescription WHERE id = ?;`, [id]);
+
+          console.log('Prescription deleted successfully with id:', id);
+
+          resolve(); // Resolve the promise when the transaction is complete
+        } catch (error) {
+          reject(error); // Reject the promise if there's an error
+        }
+      });
     });
 
-    return id;
+    return id; // Return the deleted prescription ID after everything is completed
   } catch (error) {
-    console.error('Error deleting prescription and related medicines:', error);
-    throw error;
+    console.error('Error deleting prescription and related data:', error);
+    throw error; // Rethrow the error for further handling
   }
 };
 
@@ -1017,12 +710,23 @@ const deleteMedicine = async id => {
     const db = await getDBConnection();
     await initializeDatabase();
 
-    await db.executeSql(
-      `
-      DELETE FROM medicine WHERE id = ?;
-    `,
+    const schedules = await db.executeSql(
+      `SELECT id FROM schedule WHERE medicine_id = ?;`,
       [id],
     );
+
+    // Cancel notifications for each associated schedule
+    for (let i = 0; i < schedules[0].rows.length; i++) {
+      const schedule = schedules[0].rows.item(i);
+      await cancelNotification(id, schedule.id); // Cancel the notification for the schedule
+    }
+
+    // Delete schedules associated with the medicine
+    await db.executeSql(`DELETE FROM schedule WHERE medicine_id = ?;`, [id]);
+
+    // Delete the medicine record
+    await db.executeSql(`DELETE FROM medicine WHERE id = ?;`, [id]);
+
     return id;
   } catch (error) {
     console.error('Error deleting medicine:', error);
@@ -1059,293 +763,270 @@ const getPrescription = async () => {
   }
 };
 
-// Count
-const getTotalCountOfScheduleTimes = async () => {
+const getMedicineNotification = async () => {
   try {
     const db = await getDBConnection();
     await initializeDatabase();
-    // const fromDate = new Date().toDateString();
-    // console.log('fromDate', fromDate);
-    const today = new Date();
-    const isoToday = today.toISOString().split('T')[0];
 
-    // Query to get records where today's date is between from_date and to_date
-    const results = await db.executeSql(
-      `
-      SELECT * FROM medicine
-     ;
-    `,
+    const currentTime = new Date();
+    const currentHour = currentTime.getHours();
+    const currentMinute = currentTime.getMinutes();
+    db.transaction(tx => {
+      tx.executeSql('SELECT * FROM Medicine', [], (tx, results) => {
+        const rows = results.rows;
+
+        for (let i = 0; i < rows.length; i++) {
+          const medicine = rows.item(i);
+          const [medicineHour, medicineMinute] = medicine.time
+            .split(':')
+            .map(Number);
+
+          // Check if the medicine reminder time is within 10 minutes of the current time
+          if (
+            (medicineHour === currentHour &&
+              Math.abs(medicineMinute - currentMinute) <= 10) ||
+            (medicineHour === currentHour + 1 &&
+              60 - currentMinute + medicineMinute <= 10)
+          ) {
+            // Trigger the notification
+            return medicine;
+          }
+        }
+      });
+    });
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const updateMedicineStatus = async (id, status) => {
+  try {
+    const db = await getDBConnection();
+    await initializeDatabase();
+
+    const result = await db.executeSql(
+      `UPDATE schedule SET status = ? WHERE id = ?;`,
+      [status, id],
+    );
+    console.log(result);
+    return result;
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const getAllSchedulesCount = async () => {
+  try {
+    const db = await getDBConnection();
+    await initializeDatabase();
+
+    const result = await db.executeSql(
+      `SELECT * FROM schedule;
+      `,
       [],
     );
-
-    let totalCount = 0;
-
-    // Iterate through results and count schedule_times
-    const rows = results[0].rows;
-
-    for (let i = 0; i < rows.length; i++) {
-      const record = rows.item(i);
-      const fromDate = new Date(record.from_date).toISOString().split('T')[0];
-      const toDate = new Date(record.to_date).toISOString().split('T')[0];
-
-      console.log(fromDate, toDate);
-      console.log(isoToday);
-
-      // Check if today's date is between fromDate and toDate
-      if (isoToday >= fromDate && isoToday <= toDate) {
-        const scheduleTimesJSON = record.schedule_time;
-        const totalDays = dayDifference(isoToday, fromDate);
-        console.log('Total Days: ', totalDays);
-
-        if (scheduleTimesJSON) {
-          try {
-            // Parse the JSON data
-            const scheduleTimes = JSON.parse(scheduleTimesJSON);
-
-            // Count the number of schedules
-
-            totalCount +=
-              totalDays * Array.isArray(scheduleTimes)
-                ? scheduleTimes.length
-                : 0;
-          } catch (error) {
-            console.error('Error parsing JSON:', error);
-          }
-        }
-        console.log(scheduleTimesJSON);
-      }
-    }
-    console.log(totalCount);
-    return totalCount;
+    return result;
   } catch (error) {
-    console.error('Error getting total count of schedule times:', error);
-    throw error;
+    console.error(error);
   }
 };
 
-const getMedicineWiseTakenReport = async () => {
+const getAllSchedulesCountByStatus = async status => {
   try {
     const db = await getDBConnection();
     await initializeDatabase();
 
-    // Fetch all dosages
-    const dosageResults = await db.executeSql(
-      `
-      SELECT medicine_id, dosage_time, taken
-      FROM dosage;
+    const result = await db.executeSql(
+      `SELECT * FROM schedule WHERE status = ?;
       `,
+      [status],
     );
-
-    // Fetch all medicines
-    const medicineResults = await db.executeSql(
-      `
-      SELECT id, name, description
-      FROM medicine;
-      `,
-    );
-
-    const dosages = [];
-    const medicines = [];
-
-    // Process dosage results
-    const dosageRows = dosageResults[0].rows;
-    for (let i = 0; i < dosageRows.length; i++) {
-      const row = dosageRows.item(i);
-      dosages.push(row);
-    }
-
-    // Process medicine results
-    const medicineRows = medicineResults[0].rows;
-    for (let i = 0; i < medicineRows.length; i++) {
-      const row = medicineRows.item(i);
-      medicines.push(row);
-    }
-
-    return {dosages, medicines};
+    return result;
   } catch (error) {
-    console.error('Error fetching dosages and medicines:', error);
-    throw error;
+    console.error(error);
   }
 };
 
-// Missed Med Count
-const getMissedDosagesCount = async () => {
-  const db = await getDBConnection();
-  await initializeDatabase();
-
-  try {
-    const medicines = await db.executeSql(`SELECT * FROM medicine;`);
-
-    let missedDosagesCount = 0;
-    const currentDate = new Date();
-
-    for (const medicineRow of medicines[0].rows.raw()) {
-      const {id, from_date, schedule_time} = medicineRow;
-      const schedule = JSON.parse(schedule_time); // Assuming schedule_time is a JSON string
-
-      const fromDate = new Date(from_date);
-
-      for (
-        let date = new Date(fromDate);
-        date <= currentDate;
-        date.setDate(date.getDate() + 1)
-      ) {
-        const formattedDate = date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-        // Format as HH:MM:SS
-        const formattedCurrentTime = new Date()
-          .toISOString()
-          .split('T')[1]
-          .split('.')[0];
-
-        for (const time of schedule) {
-          // const scheduledTime = `${formattedDate} ${time}`;
-          // Format Time as HH:MM:SS
-          // const scheduledTime = `${formattedDate} ${time}`;
-          // Format Time as HH:MM:SS
-          const formattedTime = new Date(time)
-            .toISOString()
-            .split('T')[1]
-            .split('.')[0];
-
-          const dosageResult = await db.executeSql(
-            `SELECT * FROM dosage WHERE medicine_id = ? AND dosage_time = ? AND taken_date = ? AND taken = 1;`,
-            [id, time, formattedDate],
-          );
-
-          if (
-            dosageResult[0].rows.length === 0 &&
-            formattedTime < formattedCurrentTime
-          ) {
-            missedDosagesCount++;
-          }
-        }
-      }
-    }
-
-    return missedDosagesCount;
-  } catch (error) {
-    console.error('Error getting missed dosages count:', error);
-    throw error;
-  }
-};
-
-const getGroupedMedicineStats = async () => {
+const getAllMissedSchedulesCount = async () => {
   try {
     const db = await getDBConnection();
     await initializeDatabase();
 
-    // Fetch all medicines within the date range
-    const [totalMedicinesResult] = await db.executeSql(`
-      SELECT id, name, from_date, to_date, schedule_time
-      FROM medicine;
-    `);
+    const result = await db.executeSql(`SELECT * FROM schedule;`, []);
 
-    const medicines = totalMedicinesResult.rows.raw();
-    let groupedStats = {};
+    const schedules = result[0].rows.raw(); // Get all schedules
 
-    for (const medicine of medicines) {
-      const schedules = JSON.parse(medicine.schedule_time);
+    const currentTime = new Date(); // Get the current time
 
-      if (!groupedStats[medicine.name]) {
-        groupedStats[medicine.name] = {
-          total: 0,
-          taken: 0,
-          missed: 0,
-          notUpdated: 0,
+    // Filter schedules for missed ones or those with expired time
+    const missedSchedules = schedules.filter(schedule => {
+      const scheduleTime = new Date(schedule.schedule_time); // Convert schedule_time to Date
+      return (
+        schedule.status === 'missed' ||
+        (scheduleTime < currentTime && schedule.status !== 'taken')
+      ); // Check status and expiration
+    });
+
+    console.log(missedSchedules.length);
+
+    return missedSchedules;
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const getAllMedicines = async () => {
+  try {
+    const db = await getDBConnection();
+    await initializeDatabase();
+
+    const result = await db.executeSql(
+      `SELECT * FROM medicine;
+      `,
+      [],
+    );
+    return result[0].rows.raw();
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const getMedicineDoses = async () => {
+  try {
+    const db = await getDBConnection();
+    await initializeDatabase();
+
+    const result = await db.executeSql(
+      `
+      SELECT m.id AS medicineId, m.name AS medicineName, 
+             s.schedule_time, 
+             s.status
+      FROM medicine m
+      LEFT JOIN schedule s ON m.id = s.medicine_id;
+      `,
+    );
+
+    const schedules = result[0].rows.raw(); // Get all medicine schedules
+
+    // Get current time for comparison
+    const currentTime = new Date();
+
+    // Create an object to hold medicine data (total, taken, missed doses)
+    const medicineDoses = {};
+
+    // Loop through all schedules and filter based on status and schedule_time
+    schedules.forEach(schedule => {
+      const {medicineId, medicineName, schedule_time, status} = schedule;
+
+      // Convert schedule_time to a JavaScript Date object
+      const scheduleTime = new Date(schedule_time);
+
+      // Initialize medicine object if not already present
+      if (!medicineDoses[medicineId]) {
+        medicineDoses[medicineId] = {
+          medicineName,
+          totalDose: 0,
+          takenDose: 0,
+          missedDose: 0,
         };
       }
 
-      const fromDate = new Date(medicine.from_date).toISOString().split('T')[0];
-      const toDate = new Date(medicine.to_date).toISOString().split('T')[0];
+      console.log(schedule);
 
-      const now = new Date();
-      console.log('Now: ', now);
-      console.log('From Date: ', fromDate);
-      console.log('To Date: ', toDate);
-      const nw = now.toISOString().split('T')[0];
+      // Add total dose
+      medicineDoses[medicineId].totalDose += 1;
 
-      // Loop from from_date to to_date for total and taken counts
-      for (
-        let d = new Date(fromDate);
-        d <= new Date(toDate);
-        d.setDate(d.getDate() + 1)
-      ) {
-        const day = d.toISOString().split('T')[0];
-        for (const schedule of schedules) {
-          // Formt to HH:MM:SS
-
-          const scheduleDateTime = new Date(schedule)
-            .toTimeString()
-            .split('T')[0];
-          const nwTime = now.toTimeString().split('T')[0];
-          // if (scheduleDateTime >= fromDate && scheduleDateTime <= toDate) {
-          groupedStats[medicine.name].total++;
-
-          if (day <= nw && scheduleDateTime <= nwTime) {
-            console.log('Schedule: ', scheduleDateTime);
-            console.log('Now: ', nwTime);
-            const [dosageResult] = await db.executeSql(
-              `SELECT * FROM dosage WHERE medicine_id = ? AND dosage_time = ? AND taken_date = ? OR taken=1;`,
-              [medicine.id, schedule, day],
-            );
-            console.log('Dosage Result: ', dosageResult);
-
-            if (dosageResult.rows.length > 0) {
-              const dosage = dosageResult.rows.item(0);
-              if (dosage.taken) {
-                groupedStats[medicine.name].taken++;
-              }
-            }
-          }
-        }
+      // Check if the dose was taken
+      if (status === 'taken') {
+        medicineDoses[medicineId].takenDose += 1;
       }
 
-      // Loop from from_date to now for missed and not updated counts
-      for (
-        let d = new Date(fromDate);
-        d <= new Date(toDate);
-        d.setDate(d.getDate() + 1)
+      // Check if the dose is missed (status is 'missed' or time has expired)
+      if (
+        status === 'missed' ||
+        (scheduleTime < currentTime && status !== 'taken')
       ) {
-        const day = d.toISOString().split('T')[0];
-        // const nw = now.toISOString().split('T')[0];
-        for (const schedule of schedules) {
-          const scheduleTime = new Date(schedule).toTimeString().split(' ')[0];
-          const scheduleDateTime = new Date(`${day}T${scheduleTime}`);
-          const nwDate = now.toISOString().split('T')[0];
-          const nwTime = now.toTimeString().split(' ')[0];
-          const nwDateTime = new Date(`${nwDate}T${nwTime}`);
-          console.log('Schedule Time Now: ', nwDateTime, scheduleDateTime);
-
-          if (scheduleDateTime <= nwDateTime) {
-            console.log('Missed Time Now: ', nwTime);
-            const [dosageResult] = await db.executeSql(
-              `SELECT * FROM dosage WHERE medicine_id = ? AND dosage_time = ? AND taken_date = ? OR taken=0;`,
-              [medicine.id, schedule, day],
-            );
-
-            if (dosageResult.rows.length > 0) {
-              const dosage = dosageResult.rows.item(0);
-              if (!dosage.taken) {
-                groupedStats[medicine.name].missed++;
-              }
-            } else {
-              // if(scheduleDateTime)
-              groupedStats[medicine.name].notUpdated++;
-            }
-          }
-        }
+        medicineDoses[medicineId].missedDose += 1;
       }
+    });
+    // (scheduleTime < currentTime && schedule.status !== 'taken')
+    // Convert the object to an array if necessary
+    return Object.values(medicineDoses); // Return an array of medicine doses
+  } catch (error) {
+    console.error('Error fetching medicine doses:', error);
+  }
+};
+
+const getMedicineById = async id => {
+  try {
+    const db = await getDBConnection();
+    await initializeDatabase();
+
+    const result = await db.executeSql(
+      `SELECT * FROM medicine WHERE id = ?;
+      `,
+      [id],
+    );
+    return result[0].rows.item(0);
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const getMedicineByScheduleId = async scheduleId => {
+  try {
+    const db = await getDBConnection();
+    await initializeDatabase();
+
+    const query = `
+      SELECT m.*, s.schedule_time, s.status, s.id as schedule_id
+      FROM medicine m
+      JOIN schedule s ON m.id = s.medicine_id
+      WHERE s.id = ?
+    `;
+
+    const result = await db.executeSql(query, [scheduleId]);
+
+    // Check if there are any results and return the first item
+    if (result[0].rows.length > 0) {
+      return result[0].rows.item(0);
+    } else {
+      console.warn(`No schedule found with ID: ${scheduleId}`);
+      return null; // Return null if no schedule is found
     }
+  } catch (error) {
+    console.error('Error fetching medicine by schedule ID:', error);
+    return null; // Return null in case of error
+  }
+};
 
-    const result = Object.keys(groupedStats).map(name => ({
-      description: medicines.find(med => med.name === name).description,
-      name: name,
-      notTakenCount: groupedStats[name].missed + groupedStats[name].notUpdated,
-      takenCount: groupedStats[name].taken,
-      totalDosages: groupedStats[name].total,
-    }));
+const getPendingSchedules = async () => {
+  try {
+    const db = await getDBConnection();
+    await initializeDatabase();
 
-    return result;
+    let medicine = [];
+    const query = `
+      SELECT m.*, s.schedule_time, s.status, s.id as schedule_id
+      FROM medicine m
+      JOIN schedule s ON m.id = s.medicine_id
+      ORDER BY s.schedule_time ASC
+    `;
+
+    const results = await db.executeSql(query);
+
+    const schedules = results[0].rows.raw();
+    schedules.forEach(schedule => {
+      const {schedule_time, status} = schedule;
+      const scheduleTime = new Date(schedule_time);
+      if (status === 'pending' && scheduleTime < new Date()) {
+        medicine.push(schedule);
+      }
+    });
+    // console.log('Missed Schedules: ', medicine);
+    return medicine;
+
+    // return result[0].rows.raw();
   } catch (error) {
     console.error(error);
   }
@@ -1369,16 +1050,14 @@ export {
   getUserDetail,
   getMedicinesAndSchedulesByPrescriptionId,
   getUpcomingMedicines,
-  addDose,
-  updateDose,
-  getDosageDetails,
-  getDoseNotTakenCount,
-  getDoseTakenCount,
-  getTotalCountOfScheduleTimes,
-  getMedicineWiseTakenReport,
-  getMissedMedicines,
-  getMissedDosages,
-  getMissedDosagesCount,
-  getUpcomingMedicinesAll,
-  getGroupedMedicineStats,
+  getMedicineNotification,
+  updateMedicineStatus,
+  getAllSchedulesCount,
+  getAllSchedulesCountByStatus,
+  getAllMissedSchedulesCount,
+  getAllMedicines,
+  getMedicineDoses,
+  getMedicineById,
+  getMedicineByScheduleId,
+  getPendingSchedules,
 };

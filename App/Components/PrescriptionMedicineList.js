@@ -119,12 +119,7 @@ const PrescriptionMedicineList = ({
                     item.schedule_times.map((time, index) => {
                       return (
                         <View key={index} style={styles.scheduleBox}>
-                          <Text style={styles.scheduleText}>
-                            {new Date(time).toLocaleString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </Text>
+                          <Text style={styles.scheduleText}>{time}</Text>
                         </View>
                       );
                     })}

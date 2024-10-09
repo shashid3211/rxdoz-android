@@ -5,7 +5,7 @@ import notifee, {
   EventType,
 } from '@notifee/react-native';
 import moment from 'moment-timezone';
-import {getUpcomingMedicinesAll, getUserDetail} from './DatabaseService';
+import {getUserDetail} from './DatabaseService';
 
 // Create a channel during app initialization or in a separate setup file
 const createNotificationChannel = async () => {

@@ -82,6 +82,7 @@ const Permission = ({navigation}) => {
         const result = await PermissionsAndroid.check(
           PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
         );
+
         return result;
       } catch (err) {
         console.warn('Error checking notification permission:', err);

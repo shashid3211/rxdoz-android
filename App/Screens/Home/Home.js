@@ -6,6 +6,7 @@ import WelcomeHeader from '../../Components/WelcomeHeader';
 import {useFocusEffect} from '@react-navigation/native';
 import {
   getMissedMedicines,
+  getPendingSchedules,
   getUpcomingMedicines,
   getUserDetail,
 } from '../../Services/DatabaseService';
@@ -31,17 +32,16 @@ const Home = ({navigation, route}) => {
       const today = new Date();
       const day = today.toISOString().split('T')[0];
       const medicines = await getUpcomingMedicines(day);
-      console.log("Today's medicines:", medicines);
       setTodayMedicines(medicines);
       const nextDay = new Date();
       nextDay.setDate(nextDay.getDate() + 1);
       const nextDayString = nextDay.toISOString().split('T')[0];
-      const nextMedicines = await getUpcomingMedicines(nextDayString);
-      console.log('Next Day medicines:', nextDayMedicines);
+      const nextMedicines = await getUpcomingMedicines(nextDayString, true);
+      // console.log('Next Day medicines:', nextMedicines);
       setNextDayMedicines(nextMedicines);
-      const missedTadayMedicines = await getMissedMedicines(day);
-      console.log('Missed medicines:', missedTadayMedicines);
-      setMissedMedicines(missedTadayMedicines);
+      const missMed = await getPendingSchedules();
+      // console.log('Missed medicines:', missedTadayMedicines);
+      setMissedMedicines(missMed);
     } catch (error) {
       console.error("Error getting today's medicines:", error);
     }

@@ -9,10 +9,38 @@ import {
   getPrescription,
 } from '../../Services/DatabaseService';
 import {useFocusEffect} from '@react-navigation/native';
-import WarningModalComponent from '../../Components/UI/WarningModalComponent';
+import ConfirmModalComponent from '../../Components/UI/ConfirmModalComponent';
+import {useTranslation} from 'react-i18next';
 
 const Treatment = ({navigation}) => {
   const [prescription, setPrescription] = useState(null);
+
+  const [modalVisible, setModalVisible] = useState(false);
+  const [deleteId, setDeleteId] = useState(null);
+  const {t} = useTranslation();
+
+  const handleConfirm = async () => {
+    try {
+      const res = await deletePrescription(deleteId); // Delete prescription
+      console.log('res: ', res);
+      setModalVisible(false);
+      // navigation.navigate('TreatmentScreen'); // Navigate to the treatment screen
+
+      // Only re-fetch if the deletion was successful
+      if (res) {
+        // setPrescription([]); // Re-fetch the updated prescription list after deletion
+        await handleGetPrescription();
+      }
+
+      // Close the modal after processing
+    } catch (error) {
+      console.error('Error during deletion:', error);
+    }
+  };
+
+  const handleCancel = () => {
+    setModalVisible(false);
+  };
 
   // Define the function to fetch prescriptions.
   const handleGetPrescription = useCallback(async () => {
@@ -22,7 +50,7 @@ const Treatment = ({navigation}) => {
         console.log('res: ', res);
         setPrescription(res);
       } else {
-        setPrescription(null);
+        setPrescription([]);
       }
     } catch (error) {
       console.error(error);
@@ -33,40 +61,14 @@ const Treatment = ({navigation}) => {
   useFocusEffect(
     useCallback(() => {
       handleGetPrescription();
-    }, [handleGetPrescription]), // This ensures the function is stable and doesn’t change unnecessarily.
+    }, []), // This ensures the function is stable and doesn’t change unnecessarily.
   );
-
-  const confirmDelete = () => {
-    return new Promise(resolve => {
-      Alert.alert(
-        'Delete Prescription',
-        'Are you sure you want to delete this prescription?',
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => resolve(false),
-          },
-          {
-            text: 'OK',
-            onPress: () => resolve(true),
-          },
-        ],
-      );
-    });
-  };
 
   // Function to remove an item and refetch the prescription list.
   const removeItem = async id => {
     try {
-      const confirm = await confirmDelete();
-
-      if (confirm) {
-        const res = await deletePrescription(id); // Assume this function deletes a prescription by ID.
-        if (res) {
-          await handleGetPrescription(); // Re-fetch the updated prescription list after deletion.
-        }
-      }
+      setDeleteId(id);
+      setModalVisible(true);
     } catch (error) {
       console.log('error: ', error);
     }
@@ -83,6 +85,14 @@ const Treatment = ({navigation}) => {
       ) : (
         <PrescriptionGetStart navigation={navigation} />
       )}
+      <ConfirmModalComponent
+        visible={modalVisible}
+        onClose={handleCancel}
+        onConfirm={handleConfirm}
+        title={t('deleteTitle')}
+        message={t('deleteMessage')}
+        icon="❌"
+      />
     </SafeAreaView>
   );
 };

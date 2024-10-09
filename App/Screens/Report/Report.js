@@ -1,40 +1,23 @@
 import {
   Image,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
-  Modal,
   Dimensions,
   Platform,
 } from 'react-native';
 import React, {useCallback, useRef, useState} from 'react';
 import {theme} from '../../Constants/theme';
-import LinearGradient from 'react-native-linear-gradient';
-import Animated from 'react-native-reanimated';
-import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
-import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  deleteDosageItem,
-  deleteMedicineItem,
-  deletePrescriptionItem,
-  getDBConnection,
-} from '../../Database/DbService';
+
 import Pdf from 'react-native-pdf';
 import RNHTMLtoPDF from 'react-native-html-to-pdf';
 import {
-  getDosageDetails,
-  getDose,
-  getDoseTakenCount,
-  getGroupedMedicineStats,
   getMedicineWiseTakenReport,
-  getMissedDosages,
-  getMissedDosagesCount,
-  getPrescription,
-  getTotalCountOfScheduleTimes,
+  getAllSchedulesCount,
+  getAllSchedulesCountByStatus,
+  getAllMissedSchedulesCount,
+  getMedicineDoses,
 } from '../../Services/DatabaseService';
 import ReportCard from '../../Components/ReportCard';
 import {useFocusEffect} from '@react-navigation/native';
@@ -44,86 +27,32 @@ const Report = ({navigation}) => {
   const {t} = useTranslation();
   const pdfref = useRef();
   const [prescription, setPrescription] = useState(null);
-  const [dosageTotal, setDosageTotal] = useState(null);
-  const [dosagesuccess, setDosageSuccess] = useState(null);
+  const [dosageTotal, setDosageTotal] = useState(0);
+  const [doseMissed, setDoseMissed] = useState(0);
+  const [dosePending, setDosePending] = useState(0);
+  const [doseTaken, setDoseTaken] = useState(0);
   const [pdfPath, setPdfPath] = useState(null);
   const [modalVisible, setModalVisible] = useState(null);
   const [medicineData, setMedicineData] = useState(null);
-  const [missDose, setMissDose] = useState(null);
 
   const getData = useCallback(async () => {
     try {
-      // const totalMedicine = await getTotalCountOfScheduleTimes();
-      // console.log('totalMedicine', totalMedicine);
-      // const takenMedicine = await getDoseTakenCount();
-      // console.log('takenMedicine', takenMedicine);
-      // const missMed = await getMissedDosagesCount();
-      // console.log('missMed', missMed);
-      const res = await getPrescription();
-      setPrescription(res);
-      const medStat = await getGroupedMedicineStats();
-      const totals = medStat.reduce(
-        (acc, item) => {
-          acc.notTakenCount += item.notTakenCount;
-          acc.takenCount += item.takenCount;
-          acc.totalDosages += item.totalDosages;
-          return acc;
-        },
-        {notTakenCount: 0, takenCount: 0, totalDosages: 0},
-      );
-      setDosageTotal(totals.totalDosages);
-      setDosageSuccess(totals.takenCount);
-      setMissDose(totals.notTakenCount);
-      setMedicineData(medStat);
-      console.log('medStat', medStat);
+      const med = await getMedicineDoses();
+      const res = await getAllSchedulesCount();
+      setDosageTotal(res[0].rows.length);
+      setPrescription(med);
+      setMedicineData(med);
+      console.log('prescription', med);
+      // Pending Med
+      const pendingMedicine = await getAllSchedulesCountByStatus('pending');
+      setDosePending(pendingMedicine[0].rows.length);
+      const takenMedicine = await getAllSchedulesCountByStatus('taken');
+      setDoseTaken(takenMedicine[0].rows.length);
+      const missedMedicine = await getAllMissedSchedulesCount();
+      console.log('missedMedicine', missedMedicine.length);
+      setDoseMissed(missedMedicine.length);
     } catch (e) {
       console.log(e);
-    }
-  }, []);
-
-  const removeItem = async id => {
-    try {
-      const db = await getDBConnection();
-      await deleteDosageItem(db, id);
-      await deleteMedicineItem(db, id);
-      await deletePrescriptionItem(db, id).then(() => {
-        navigation.replace('MainTab');
-      });
-      navigation.replace('MainTab');
-    } catch (error) {
-      console.log('error: ', error);
-    }
-  };
-
-  const categorizeDosages = dosageRecords => {
-    const takenDosages = [];
-    const missedDosages = [];
-
-    const now = new Date(); // Current date and time
-
-    for (const record of dosageRecords) {
-      const dosageDate = new Date(record.dosage_time);
-
-      // Check if dosage is missed or taken
-      if (record.taken) {
-        takenDosages.push(record);
-      } else if (dosageDate <= now) {
-        missedDosages.push(record);
-      }
-    }
-
-    return {takenDosages, missedDosages};
-  };
-
-  const getTakenAndMissedDosages = useCallback(async () => {
-    try {
-      const dosageRecords = await getDosageDetails();
-      const categorizedDosages = categorizeDosages(dosageRecords);
-      console.log('categorizedDosages', categorizedDosages);
-      return categorizedDosages;
-    } catch (error) {
-      console.error('Error fetching taken and missed dosages:', error);
-      throw error;
     }
   }, []);
 
@@ -175,9 +104,9 @@ const Report = ({navigation}) => {
   useFocusEffect(
     useCallback(() => {
       getData();
-      getTakenAndMissedDosages();
-      getMedicineWiseTakenReportDetails();
-    }, [getData, getTakenAndMissedDosages, getMedicineWiseTakenReportDetails]),
+      // getTakenAndMissedDosages();
+      // getMedicineWiseTakenReportDetails();
+    }, [getData]),
   );
 
   const createPDF = async item => {
@@ -344,9 +273,7 @@ const Report = ({navigation}) => {
               </View>
 
               <View style={[styles.profileBox]}>
-                <Text style={styles.heading}>
-                  {dosagesuccess ? dosagesuccess : '0'}
-                </Text>
+                <Text style={styles.heading}>{doseTaken}</Text>
                 <Text style={styles.textTitle}>{t('doseTaken')}</Text>
               </View>
             </View>
@@ -363,7 +290,7 @@ const Report = ({navigation}) => {
               </View>
 
               <View style={[styles.profileBox]}>
-                <Text style={styles.heading}>{missDose}</Text>
+                <Text style={styles.heading}>{doseMissed}</Text>
                 <Text style={styles.textTitle}>{t('doseMissed')}</Text>
               </View>
             </View>
