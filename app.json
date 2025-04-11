@@ -1,5 +1,5 @@
 {
-  "name": "ReminderApp",
-  "displayName": "ReminderApp",
+  "name": "RxDoz",
+  "displayName": "RxDoz",
   "plugins": ["@notifee/react-native"]
 }

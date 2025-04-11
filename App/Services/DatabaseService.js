@@ -69,6 +69,8 @@ const initializeDatabase = async () => {
         instruction TEXT,
         photo TEXT,
         times TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT DEFAULT (datetime('now', 'localtime')),
         FOREIGN KEY (prescription_id) REFERENCES prescription(id)
       );
     `);
@@ -83,6 +85,7 @@ const initializeDatabase = async () => {
 
     // await db.executeSql('DROP TABLE IF EXISTS schedule;');
     // await db.executeSql('DROP TABLE IF EXISTS medicine;');
+    // await db.executeSql('DROP TABLE IF EXISTS dosage;');
 
     await db.executeSql(`
       CREATE TABLE IF NOT EXISTS dosage (
@@ -852,26 +855,40 @@ const getAllMissedSchedulesCount = async () => {
     const db = await getDBConnection();
     await initializeDatabase();
 
-    const result = await db.executeSql(`SELECT * FROM schedule;`, []);
+    const result = await db.executeSql(
+      `SELECT 
+          schedule.id AS schedule_id, 
+          schedule.schedule_time, 
+          schedule.status, 
+          medicine.created_at 
+       FROM schedule
+       JOIN medicine ON schedule.medicine_id = medicine.id
+       WHERE schedule.status != 'taken';`, // Ignore taken medicines
+      [],
+    );
 
-    const schedules = result[0].rows.raw(); // Get all schedules
+    const schedules = result[0].rows.raw(); // Convert result to array
 
-    const currentTime = new Date(); // Get the current time
+    const currentTime = new Date(); // Get current time
 
-    // Filter schedules for missed ones or those with expired time
+    // Filter only missed schedules that occurred AFTER the created_at time
     const missedSchedules = schedules.filter(schedule => {
       const scheduleTime = new Date(schedule.schedule_time); // Convert schedule_time to Date
+      const createdAtTime = new Date(schedule.created_at); // Convert created_at to Date
+
       return (
-        schedule.status === 'missed' ||
-        (scheduleTime < currentTime && schedule.status !== 'taken')
-      ); // Check status and expiration
+        scheduleTime < currentTime && // Schedule time is in the past
+        schedule.status !== 'taken' && // Not taken
+        scheduleTime > createdAtTime // Only consider schedules after medicine creation
+      );
     });
 
-    console.log(missedSchedules.length);
+    console.log(`Missed Schedules Count: ${missedSchedules.length}`);
 
-    return missedSchedules;
+    return missedSchedules; // Return count
   } catch (error) {
-    console.error(error);
+    console.error('Error fetching missed schedules:', error);
+    return 0;
   }
 };
 
@@ -898,15 +915,18 @@ const getMedicineDoses = async () => {
 
     const result = await db.executeSql(
       `
-      SELECT m.id AS medicineId, m.name AS medicineName, 
+      SELECT m.id AS medicineId, 
+             m.name AS medicineName, 
+             m.created_at AS medicineCreatedAt, 
              s.schedule_time, 
              s.status
       FROM medicine m
       LEFT JOIN schedule s ON m.id = s.medicine_id;
       `,
+      [],
     );
 
-    const schedules = result[0].rows.raw(); // Get all medicine schedules
+    const schedules = result[0].rows.raw(); // Convert result to array
 
     // Get current time for comparison
     const currentTime = new Date();
@@ -916,10 +936,17 @@ const getMedicineDoses = async () => {
 
     // Loop through all schedules and filter based on status and schedule_time
     schedules.forEach(schedule => {
-      const {medicineId, medicineName, schedule_time, status} = schedule;
+      const {
+        medicineId,
+        medicineName,
+        medicineCreatedAt,
+        schedule_time,
+        status,
+      } = schedule;
 
-      // Convert schedule_time to a JavaScript Date object
+      // Convert schedule_time and medicineCreatedAt to JavaScript Date objects
       const scheduleTime = new Date(schedule_time);
+      const createdAtTime = new Date(medicineCreatedAt);
 
       // Initialize medicine object if not already present
       if (!medicineDoses[medicineId]) {
@@ -931,8 +958,6 @@ const getMedicineDoses = async () => {
         };
       }
 
-      console.log(schedule);
-
       // Add total dose
       medicineDoses[medicineId].totalDose += 1;
 
@@ -943,14 +968,14 @@ const getMedicineDoses = async () => {
 
       // Check if the dose is missed (status is 'missed' or time has expired)
       if (
-        status === 'missed' ||
-        (scheduleTime < currentTime && status !== 'taken')
+        (status === 'missed' ||
+          (scheduleTime < currentTime && status !== 'taken')) &&
+        scheduleTime > createdAtTime // Ensure schedule_time is after medicineCreatedAt
       ) {
         medicineDoses[medicineId].missedDose += 1;
       }
     });
-    // (scheduleTime < currentTime && schedule.status !== 'taken')
-    // Convert the object to an array if necessary
+
     return Object.values(medicineDoses); // Return an array of medicine doses
   } catch (error) {
     console.error('Error fetching medicine doses:', error);
@@ -1005,28 +1030,40 @@ const getPendingSchedules = async () => {
     const db = await getDBConnection();
     await initializeDatabase();
 
-    let medicine = [];
+    let pendingMedicines = [];
+
     const query = `
-      SELECT m.*, s.schedule_time, s.status, s.id as schedule_id
+      SELECT m.*, 
+             m.created_at AS medicineCreatedAt, 
+             s.schedule_time, 
+             s.status, 
+             s.id AS schedule_id
       FROM medicine m
       JOIN schedule s ON m.id = s.medicine_id
       ORDER BY s.schedule_time ASC
     `;
 
     const results = await db.executeSql(query);
-
     const schedules = results[0].rows.raw();
+
     schedules.forEach(schedule => {
-      const {schedule_time, status} = schedule;
+      const {schedule_time, status, medicineCreatedAt} = schedule;
+
       const scheduleTime = new Date(schedule_time);
-      if (status === 'pending' && scheduleTime < new Date()) {
-        medicine.push(schedule);
+      const createdAtTime = new Date(medicineCreatedAt);
+      const currentTime = new Date();
+
+      // Check if the schedule is 'pending' and the time has passed
+      if (
+        status === 'pending' &&
+        scheduleTime < currentTime &&
+        scheduleTime > createdAtTime
+      ) {
+        pendingMedicines.push(schedule);
       }
     });
-    // console.log('Missed Schedules: ', medicine);
-    return medicine;
 
-    // return result[0].rows.raw();
+    return pendingMedicines;
   } catch (error) {
     console.error(error);
   }

@@ -1,30 +1,25 @@
+import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
-  Image,
+  Alert,
+  Dimensions,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
-  View,
-  Modal,
-  Dimensions,
-  Alert,
+  View
 } from 'react-native';
-import React, {useEffect, useState} from 'react';
-import {theme} from '../../Constants/theme';
-import {Divider, TextInput} from 'react-native-paper';
-import DatePicker from 'react-native-date-picker';
-import LinearGradient from 'react-native-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
+import RNFS from 'react-native-fs';
+import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import { Divider } from 'react-native-paper';
+import ModalPanel from '../../Components/Modal';
+import ButtonComponent from '../../Components/UI/ButtonComponent';
+import IconButonComponent from '../../Components/UI/IconButonComponent';
+import ImagePickerRound from '../../Components/UI/ImagePickerRound';
 import TextInputComponent from '../../Components/UI/TextInputComponent';
 import TimePickerComponent from '../../Components/UI/TimePickerComponent';
-import ButtonComponent from '../../Components/UI/ButtonComponent';
-import ImagePickerRound from '../../Components/UI/ImagePickerRound';
-import IconButonComponent from '../../Components/UI/IconButonComponent';
-import ModalPanel from '../../Components/Modal';
-import {addUser, getUserDetail} from '../../Services/DatabaseService';
-import RNFS from 'react-native-fs';
-import {useTranslation} from 'react-i18next';
+import { theme } from '../../Constants/theme';
+import { addUser, getUserDetail } from '../../Services/DatabaseService';
 
 const UserSchedule = ({navigation}) => {
   const {t} = useTranslation();
@@ -193,6 +188,7 @@ const UserSchedule = ({navigation}) => {
 
   return (
     <SafeAreaView style={styles.container}>
+    <ScrollView contentContainerStyle={styles.scrollViewContent}>
       <View style={styles.mainView}>
         <ImagePickerRound
           onPress={() => setIsBottomSheetOpen(true)}
@@ -289,11 +285,19 @@ const UserSchedule = ({navigation}) => {
           img={require('../../Assets/r4.jpg')}
         />
 
-        <ButtonComponent onPress={handleUserData} text="Continue" />
+          {/* <ButtonComponent onPress={handleUserData} text="Continue" /> */}
+          <View style={styles.buttonWrapper}>
+          <ButtonComponent onPress={handleUserData} text="Continue" />
+        </View>
 
         {/* Modal */}
 
-        <ModalPanel
+       
+
+        {/*--------- Modal end -----------*/}
+      </View>
+      </ScrollView>
+      <ModalPanel
           animationType="slide"
           modalVisible={isBottomSheetOpen}
           setModalVisible={setIsBottomSheetOpen}>
@@ -326,26 +330,40 @@ const UserSchedule = ({navigation}) => {
             </View>
           </View>
         </ModalPanel>
-
-        {/*--------- Modal end -----------*/}
-      </View>
-    </SafeAreaView>
+      </SafeAreaView>
   );
 };
 
 export default UserSchedule;
 
 const styles = StyleSheet.create({
+  // container: {
+  //   flex: 1,
+  //   backgroundColor: theme.COLORS.white,
+  // },
+  // mainView: {
+  //   flex: 1,
+  //   flexGrow: 1,
+  //   marginTop: 40,
+  //   paddingHorizontal: 20,
+  //   // justifyContent: 'center',
+  //   // alignItems: 'center',
+  // },
   container: {
     flex: 1,
     backgroundColor: theme.COLORS.white,
   },
+  scrollViewContent: {
+    flexGrow: 1,
+    padding: 20,
+  },
   mainView: {
     flex: 1,
-    marginTop: 40,
-    paddingHorizontal: 20,
-    // justifyContent: 'center',
-    // alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  buttonWrapper: {
+    marginTop: 10,
+    marginBottom: 120,
   },
   title: {
     color: theme.COLORS.black,

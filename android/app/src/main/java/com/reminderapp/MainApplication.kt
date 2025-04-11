@@ -1,4 +1,4 @@
-package com.rxdoz.reminderapp
+package com.destina.rxdoz
 
 import android.app.Application
 import com.facebook.react.PackageList
@@ -35,6 +35,7 @@ class MainApplication : Application(), ReactApplication {
         get() = getDefaultReactHost(this.applicationContext, reactNativeHost)
 
     override fun onCreate() {
+        // SplashScreen.installSplashScreen(this)
         super.onCreate()
         SoLoader.init(this, false)
         

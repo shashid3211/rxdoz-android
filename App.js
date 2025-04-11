@@ -10,32 +10,30 @@ import {Landing, Permission, UserSchedule} from './App/Screens';
 
 import * as RNLocalize from 'react-native-localize';
 import i18n from './App/utils/i18n';
-import {
-  getMedicineAndScheduleId,
-  handleNotificationPress,
-} from './App/Services/NotifyService';
+
 import {navigationRef} from './App/Services/NavigationService';
-import {getMedicineByScheduleId} from './App/Services/DatabaseService';
+import {
+  getAllMedicines,
+  getMedicineByScheduleId,
+} from './App/Services/DatabaseService';
 
 import notifee, {AndroidImportance, EventType} from '@notifee/react-native';
 
 const Stack = createNativeStackNavigator();
 function App() {
-  const handleNotification = async () => {
-    notifee.onForegroundEvent(({type, detail}) => {
-      if (type === EventType.ACTION_PRESS && detail.pressAction.id) {
-        console.log(
-          'User pressed an action with the id: ',
-          detail.pressAction.id,
-          detail,
-        );
-      }
-    });
-  };
-
   useEffect(() => {
-    handleNotificationPress(); // Set up notification handling on app start
-    // handleNotification();
+    const fetchMedicines = async () => {
+      try {
+        const res = await getAllMedicines();
+        const existingNotifications = await notifee.getTriggerNotifications();
+        console.log('Medicine Lists: ', res);
+        console.log('Notifications Lists: ', existingNotifications);
+      } catch (error) {
+        console.error('Error fetching medicines:', error);
+      }
+    };
+
+    fetchMedicines();
   }, []);
 
   useEffect(() => {

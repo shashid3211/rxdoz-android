@@ -1,7 +1,7 @@
-import {StyleSheet, Text, TouchableOpacity} from 'react-native';
 import React from 'react';
+import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import {theme} from '../../Constants/theme';
+import { theme } from '../../Constants/theme';
 
 const ButtonComponent = ({onPress, text}) => {
   return (
@@ -31,8 +31,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 100,
-    width: '70%',
-    height: 50,
+    // width: '70%',
+    // height: 50,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,

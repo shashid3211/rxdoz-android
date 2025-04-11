@@ -1,166 +1,103 @@
+// notificationService.js
+
 import notifee, {
-  TriggerType,
   AndroidImportance,
   AndroidStyle,
+  TriggerType,
   EventType,
+  AndroidCategory,
 } from '@notifee/react-native';
-import moment from 'moment-timezone';
-import {getUserDetail} from './DatabaseService';
+import {navigationRef} from './NavigationService';
+import {
+  getMedicineByScheduleId,
+  getUserDetail,
+  updateMedicineStatus,
+} from './DatabaseService';
+import {Platform} from 'react-native';
 
-// Create a channel during app initialization or in a separate setup file
-const createNotificationChannel = async () => {
-  return await notifee.createChannel({
-    id: 'alarm',
-    name: 'Firing alarms & timers',
-    lights: false,
-    vibration: true,
-    importance: AndroidImportance.DEFAULT,
-    sound: 'notification_ding',
-  });
-};
+/**
+ * Schedules a notification for a specific medicine reminder
+ * @param {number} medicineId - The unique ID of the medicine.
+ * @param {string} medicineName - The name of the medicine.
+ * @param {Date} notificationTime - The time when the notification should be triggered.
+ * @param {string} time - The scheduled time for the notification.
+ *
+ */
 
-// Notification scheduling function
-// const notifyBasedOnSchedule = async (t, data) => {
-//   console.log('notifyBasedOnSchedule called');
-//   try {
-//     console.log('data', data);
-//     console.log('Scheduling notifications...');
-//     const medicines = await getUpcomingMedicinesAll();
-//     // console.log('Medicines:', medicines);
-
-//     // Ensure channel creation
-//     const channelId = await createNotificationChannel();
-
-//     // Process each medicine
-//     for (const medicine of medicines) {
-//       const schedules = medicine.upcomingSchedules.filter(Boolean); // Filter out any null or empty values
-
-//       console.log('Schedules:', schedules);
-
-//       // Process each schedule
-//       for (const schedule of schedules) {
-//         const formattedTime = extractTime(schedule);
-//         console.log('Formatted Time:', formattedTime);
-//         await processSchedule(formattedTime, medicine, t, channelId);
-//       }
-//     }
-//   } catch (error) {
-//     console.error('Error scheduling notifications:', error);
-//   }
-// };
-const notifyBasedOnSchedule = async (t, medicineData) => {
-  console.log('notifyBasedOnSchedule called');
-  try {
-    console.log('Medicine Data:', medicineData);
-    console.log('Scheduling notifications...');
-
-    // Ensure channel creation
-    const channelId = await createNotificationChannel();
-
-    // Extract relevant data from medicineData
-    const {name, description, from_date, to_date, schedule_times} =
-      medicineData;
-    console.log('Medicine Data:', {
-      name,
-      description,
-      from_date,
-      to_date,
-      schedule_times,
-    });
-
-    // Parse dates
-    const startDate = moment(new Date(from_date)).tz('Asia/Kolkata');
-    const endDate = moment(new Date(to_date)).tz('Asia/Kolkata');
-
-    // Iterate through each date in the range
-    let currentDate = startDate.clone();
-    while (currentDate.isSameOrBefore(endDate)) {
-      // Process each schedule time for the current date
-      for (const scheduleTime of schedule_times) {
-        const formattedTime = extractTime(scheduleTime);
-        console.log('Formatted Time:', formattedTime);
-        await processSchedule(
-          formattedTime,
-          currentDate,
-          medicineData,
-          t,
-          channelId,
-        );
-      }
-      // Move to the next day
-      currentDate.add(1, 'day');
-    }
-  } catch (error) {
-    console.error('Error scheduling notifications:', error);
-  }
-};
-
-// Get time from schedule
-const extractTime = dateString => {
-  const date = new Date(dateString);
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
-};
-
-// Function to process and create notification for a specific schedule
-const processSchedule = async (
-  schedule,
-  currentDate,
-  medicine,
+const scheduleNotification = async (
+  medicineId,
+  scheduleId,
+  medicineName,
+  notificationTime,
   t,
-  channelId,
 ) => {
   try {
-    const [hour, minute] = schedule.split(':').map(Number);
-    const scheduleTime = currentDate
-      .clone()
-      .set({hour, minute, second: 0, millisecond: 0});
-
-    console.log('Schedule Time:', scheduleTime.format());
-
-    // Schedule notification if time is in the future
-    if (scheduleTime.isAfter(moment().tz('Asia/Kolkata'))) {
-      await createNotification(scheduleTime, medicine, t, channelId);
-    } else {
-      console.log('Skipping notification: Time is in the past');
+    const sound = Platform.Version >= 33 ? 'wakeup' : 'default';
+    if (
+      !(notificationTime instanceof Date) ||
+      isNaN(notificationTime.getTime())
+    ) {
+      console.error('Invalid notificationTime:', notificationTime);
+      throw new Error('Invalid notification time.');
     }
-  } catch (error) {
-    console.error('Error processing schedule:', error);
-  }
-};
 
-// Function to create a notification
-const createNotification = async (scheduleTime, medicine, t, channelId) => {
-  try {
     const user = await getUserDetail();
     console.log('User:', user);
 
+    const createNotificationChannel = async () => {
+      const channelId = 'alarm';
+      const channels = await notifee.getChannels();
+
+      // Check if the channel already exists
+      const channelExists = channels.some(channel => channel.id === channelId);
+
+      if (!channelExists) {
+        return await notifee.createChannel({
+          id: channelId,
+          name: 'Firing alarms & timers',
+          lights: true,
+          vibration: true,
+          vibrationPattern: [300, 500],
+          importance: AndroidImportance.HIGH,
+          sound: sound,
+        });
+      }
+
+      return channelId; // Return the existing channel ID
+    };
+    const time = notificationTime.toLocaleString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const date = notificationTime.toISOString().split('T')[0];
+
+    const channelId = await createNotificationChannel();
+
+    console.log('Channel ID:', channelId);
+
     const trigger = {
       type: TriggerType.TIMESTAMP,
-      timestamp: scheduleTime.valueOf(), // Fire at specific date/time
+      timestamp: notificationTime.valueOf(), // Fire at specific date/time
+      alarmManager: {
+        allowWhileIdle: true,
+      },
     };
 
-    const dateObj = new Date(scheduleTime);
-    const date = dateObj.toISOString().split('T')[0]; // "2024-08-03"
-    const time = dateObj.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: true,
-    });
     const message = t('notificationMessage', {
       time,
       date,
-      medicine: medicine.name,
+      medicine: medicineName,
     });
 
-    const title = `Hello ${user.name}`;
+    const title = `Hello ${user.name}, Medication Reminder!`;
 
     const notificationOptions = {
+      id: `medicine_${medicineId}_schedule_${scheduleId}`, // Unique ID combining medicineId, date, and time
       title: title,
-      body: message,
+      body: `It's time to take your medicine: ${medicineName}`,
       android: {
         channelId, // Ensure this channel exists
+        sound: sound,
         largeIcon: require('../Assets/logo.jpg'), // Use the local asset
         style: {
           type: AndroidStyle.BIGTEXT,
@@ -168,30 +105,105 @@ const createNotification = async (scheduleTime, medicine, t, channelId) => {
         },
         pressAction: {
           id: 'default',
+          launchActivity: 'default',
         },
+        category: AndroidCategory.ALARM,
+        fullScreenAction: {
+          id: 'default',
+        },
+        lightUpScreen: true,
+        loopSound: true,
+        showTimestamp: true,
+        actions: [
+          {
+            title: 'Take',
+            pressAction: {
+              id: 'take',
+              launchActivity: 'default',
+            },
+          },
+          {
+            title: 'Skip',
+            pressAction: {
+              id: 'skip',
+              launchActivity: 'default',
+            },
+          },
+        ],
       },
     };
 
-    // Create a trigger notification
     const notificationId = await notifee.createTriggerNotification(
       notificationOptions,
       trigger,
     );
-    console.log(`Notification ID: ${notificationId}`);
     console.log(
-      `Notification scheduled for ${medicine.name} at ${scheduleTime.format()}`,
+      `Notification scheduled for ${medicineName} at ${notificationTime}, ${notificationId}`,
     );
   } catch (error) {
-    console.error('Error creating notification:', error);
+    console.error('Error scheduling notification:', error);
   }
 };
 
-// Set a background event handler
-notifee.onBackgroundEvent(async ({type, detail}) => {
-  if (type === EventType.ACTION_PRESS) {
-    console.log('User pressed notification action:', detail.pressAction.id);
-    // Handle background notification action press here
-  }
-});
+const cancelNotification = async (medicineId, scheduleId) => {
+  try {
+    // Generate the same notification ID used while scheduling
+    const notificationId = `medicine_${medicineId}_schedule_${scheduleId}`;
 
-export default notifyBasedOnSchedule;
+    // Cancel the notification
+    await notifee.cancelNotification(notificationId);
+
+    console.log(`Notification canceled: ${notificationId}`);
+  } catch (error) {
+    console.error('Error canceling notification:', error);
+  }
+};
+
+const handleNotificationPress = () => {
+  notifee.onForegroundEvent(async ({type, detail}) => {
+    if (type === EventType.ACTION_PRESS && detail.pressAction.id) {
+      const [medicineId, scheduleId] = getMedicineAndScheduleId(
+        detail.notification.id,
+      );
+      console.log('Notification pressed:', detail.notification.id);
+      console.log('Notification pressed:', medicineId, scheduleId);
+      if (medicineId && scheduleId) {
+        if (detail.pressAction.id === 'take') {
+          const res = await updateMedicineStatus(scheduleId, 'taken');
+          console.log('Notification pressed:', res);
+        } else {
+          await updateMedicineStatus(scheduleId, 'missed');
+        }
+      }
+    }
+  });
+
+  // Handle background notification events
+  notifee.onBackgroundEvent(async ({type, detail}) => {
+    if (type === EventType.ACTION_PRESS && detail.pressAction.id) {
+      const [medicineId, scheduleId] = getMedicineAndScheduleId(
+        detail.notification.id,
+      );
+
+      console.log('Notification pressed Background:', detail.notification.id);
+      console.log('Notification pressed:', medicineId, scheduleId);
+
+      if (medicineId && scheduleId) {
+        if (detail.pressAction.id === 'take') {
+          await updateMedicineStatus(scheduleId, 'taken');
+        } else {
+          await updateMedicineStatus(scheduleId, 'missed');
+        }
+      }
+    }
+  });
+};
+
+export const getMedicineAndScheduleId = identifier => {
+  const parts = identifier.split('_'); // Split the string by underscores
+  const medicineId = parts[1]; // The second part is the medicineId
+  const scheduleId = parts[3];
+  return [medicineId, scheduleId];
+};
+
+export {scheduleNotification, cancelNotification, handleNotificationPress};
